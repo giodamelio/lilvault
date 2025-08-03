@@ -1,0 +1,18 @@
+# Devenv
+.devenv*
+devenv.local.nix
+.mcp.json
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
+
+# Rust builds
+/target
+
+tmp/
+
+# Mutants runs
+mutants.*
