@@ -1,0 +1,80 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__language-server__edit_file|mcp__language-server__rename_symbol|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "treefmt"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "condition": "path matches '*.rs'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo check"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "condition": "path matches '*test*.rs' or path matches 'tests/'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo test"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "condition": "path matches '*.rs'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo clippy -- -D warnings"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "condition": "path matches 'src/lib.rs' or path matches 'src/main.rs'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo doc --no-deps"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "condition": "path matches 'Cargo.toml'",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo tree --duplicates"
+          },
+          {
+            "type": "command",
+            "command": "cargo doc --no-deps"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/notification-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
