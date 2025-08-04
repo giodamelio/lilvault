@@ -41,7 +41,7 @@
 
       # Create database and run migrations
       sqlx database create
-      sqlx migrate --source ${./migrations} run
+      sqlx migrate run --source ${./migrations}
     '';
 
   # Define the lilvault package
@@ -69,6 +69,9 @@
     preBuild = ''
       export DATABASE_URL=sqlite:${sqlx-db}/db.sqlite3
     '';
+
+    # Skip tests in Nix build (tests require interactive terminal features)
+    doCheck = false;
 
     meta = with lib; {
       description = "A secure, encrypted secrets management system for homelabs";
@@ -190,6 +193,8 @@ in {
   '';
 
   # Export the lilvault package so other flakes can reference it
+  devenv.root = ./.;
+
   outputs = {
     packages = {
       lilvault = lilvault;
