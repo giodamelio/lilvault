@@ -203,6 +203,7 @@
           programs = {
             alejandra.enable = true; # Nix formatter
             rustfmt.enable = true; # Rust formatter
+            shfmt.enable = true; # Shell script formatter
           };
         };
 
@@ -224,6 +225,12 @@
                 settings = {
                   denyWarnings = true;
                 };
+              };
+
+              # Shell script linting
+              shellcheck = {
+                enable = true;
+                description = "Lint shell scripts with shellcheck";
               };
 
               # General code quality
