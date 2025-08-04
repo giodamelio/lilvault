@@ -124,3 +124,138 @@ impl From<anyhow::Error> for LilVaultError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_display() {
+        let error = LilVaultError::SecretNotFound {
+            name: "test-secret".to_string(),
+        };
+        assert_eq!(error.to_string(), "Secret not found: test-secret");
+    }
+
+    #[test]
+    fn test_internal_error() {
+        let error = LilVaultError::Internal {
+            message: "Something went wrong".to_string(),
+        };
+        assert_eq!(error.to_string(), "Internal error: Something went wrong");
+    }
+
+    #[test]
+    fn test_ssh_key_error() {
+        let error = LilVaultError::SshKey {
+            message: "Invalid SSH key format".to_string(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "SSH key parsing error: Invalid SSH key format"
+        );
+    }
+
+    #[test]
+    fn test_vault_not_initialized() {
+        let error = LilVaultError::VaultNotInitialized;
+        assert_eq!(error.to_string(), "Vault not initialized");
+    }
+
+    #[test]
+    fn test_vault_already_initialized() {
+        let error = LilVaultError::VaultAlreadyInitialized;
+        assert_eq!(error.to_string(), "Vault already initialized");
+    }
+
+    #[test]
+    fn test_password_required() {
+        let error = LilVaultError::PasswordRequired;
+        assert_eq!(error.to_string(), "Password required");
+    }
+
+    #[test]
+    fn test_invalid_password() {
+        let error = LilVaultError::InvalidPassword;
+        assert_eq!(error.to_string(), "Invalid password");
+    }
+
+    #[test]
+    fn test_no_access_error() {
+        let error = LilVaultError::NoAccess {
+            secret_name: "private-secret".to_string(),
+        };
+        assert_eq!(error.to_string(), "No access to secret: private-secret");
+    }
+
+    #[test]
+    fn test_secret_version_not_found() {
+        let error = LilVaultError::SecretVersionNotFound {
+            name: "my-secret".to_string(),
+            version: 42,
+        };
+        assert_eq!(
+            error.to_string(),
+            "Secret version not found: my-secret version 42"
+        );
+    }
+
+    #[test]
+    fn test_invalid_fingerprint() {
+        let error = LilVaultError::InvalidFingerprint {
+            fingerprint: "invalid-fp".to_string(),
+        };
+        assert_eq!(error.to_string(), "Invalid key fingerprint: invalid-fp");
+    }
+
+    #[test]
+    fn test_host_key_not_found() {
+        let error = LilVaultError::HostKeyNotFound {
+            hostname: "server1".to_string(),
+        };
+        assert_eq!(error.to_string(), "Host key not found: server1");
+    }
+
+    #[test]
+    fn test_master_key_not_found() {
+        let error = LilVaultError::MasterKeyNotFound {
+            name: "backup-key".to_string(),
+        };
+        assert_eq!(error.to_string(), "Master key not found: backup-key");
+    }
+
+    #[test]
+    fn test_anyhow_error_conversion() {
+        let anyhow_error = anyhow::anyhow!("Test anyhow error");
+        let lilvault_error: LilVaultError = anyhow_error.into();
+
+        match lilvault_error {
+            LilVaultError::Internal { message } => {
+                assert_eq!(message, "Test anyhow error");
+            }
+            _ => panic!("Expected Internal error"),
+        }
+    }
+
+    #[test]
+    fn test_result_type_alias() {
+        fn test_function() -> Result<String> {
+            Ok("success".to_string())
+        }
+
+        let result = test_function();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "success");
+    }
+
+    #[test]
+    fn test_result_with_error() {
+        fn test_function() -> Result<String> {
+            Err(LilVaultError::PasswordRequired)
+        }
+
+        let result = test_function();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Password required");
+    }
+}

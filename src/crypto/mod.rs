@@ -232,3 +232,251 @@ pub fn get_password(prompt: &str, password_file: Option<&std::path::Path>) -> Re
         None => prompt_password(prompt),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_generate_fingerprint() {
+        // Test that fingerprint is deterministic and correct length
+        let public_key = "age1ql3n4n93j3j4l2a3rk6t3q3q5z3a4a5a6a7a8a9a0a1a2a3a4a5a6a7a8a9a0a1";
+        let fingerprint1 = generate_fingerprint(public_key);
+        let fingerprint2 = generate_fingerprint(public_key);
+
+        assert_eq!(
+            fingerprint1, fingerprint2,
+            "Fingerprint should be deterministic"
+        );
+        assert_eq!(
+            fingerprint1.len(),
+            16,
+            "Fingerprint should be 16 characters long"
+        );
+
+        // Test different keys produce different fingerprints
+        let different_key = "age1ql3n4n93j3j4l2a3rk6t3q3q5z3a4a5a6a7a8a9a0a1a2a3a4a5a6a7a8a9a0a2";
+        let different_fingerprint = generate_fingerprint(different_key);
+        assert_ne!(
+            fingerprint1, different_fingerprint,
+            "Different keys should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn test_generate_fingerprint_empty_key() {
+        let fingerprint = generate_fingerprint("");
+        assert_eq!(
+            fingerprint.len(),
+            16,
+            "Empty key should still produce 16-char fingerprint"
+        );
+    }
+
+    #[test]
+    fn test_read_password_from_file() {
+        // Create a temporary file with a password
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let password = "test-password-123";
+        writeln!(temp_file, "{}", password).expect("Failed to write to temp file");
+
+        let result = read_password_from_file(temp_file.path());
+        assert!(
+            result.is_ok(),
+            "Should successfully read password from file"
+        );
+        assert_eq!(result.unwrap(), password, "Should return correct password");
+    }
+
+    #[test]
+    fn test_read_password_from_file_with_whitespace() {
+        // Create a temporary file with password and whitespace
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let password = "test-password-123";
+        writeln!(temp_file, "  {}  \n", password).expect("Failed to write to temp file");
+
+        let result = read_password_from_file(temp_file.path());
+        assert!(
+            result.is_ok(),
+            "Should successfully read password from file"
+        );
+        assert_eq!(
+            result.unwrap(),
+            password,
+            "Should trim whitespace from password"
+        );
+    }
+
+    #[test]
+    fn test_read_password_from_nonexistent_file() {
+        let result = read_password_from_file(std::path::Path::new("/nonexistent/file.txt"));
+        assert!(result.is_err(), "Should fail when file doesn't exist");
+
+        match result.unwrap_err() {
+            LilVaultError::Internal { message } => {
+                assert!(
+                    message.contains("Failed to read password file"),
+                    "Error message should indicate file read failure"
+                );
+            }
+            _ => panic!("Expected Internal error"),
+        }
+    }
+
+    #[test]
+    fn test_get_password_with_file() {
+        // Create a temporary file with a password
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let password = "file-password-456";
+        writeln!(temp_file, "{}", password).expect("Failed to write to temp file");
+
+        let result = get_password("Enter password", Some(temp_file.path()));
+        assert!(result.is_ok(), "Should successfully get password from file");
+        assert_eq!(
+            result.unwrap(),
+            password,
+            "Should return correct password from file"
+        );
+    }
+
+    #[test]
+    fn test_master_key_roundtrip() {
+        let password = "test-password-123";
+
+        // Generate a master key
+        let (public_key, encrypted_private_key) =
+            generate_master_key(password).expect("Should generate master key successfully");
+
+        // Verify public key format
+        assert!(
+            public_key.starts_with("age1"),
+            "Public key should start with 'age1'"
+        );
+        assert!(
+            !encrypted_private_key.is_empty(),
+            "Encrypted private key should not be empty"
+        );
+
+        // Decrypt the master key
+        let identity = decrypt_master_key(&encrypted_private_key, password)
+            .expect("Should decrypt master key successfully");
+
+        // Verify we can get the public key back
+        let recovered_public_key = identity.to_public().to_string();
+        assert_eq!(
+            public_key, recovered_public_key,
+            "Public key should match after roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_decrypt_master_key_wrong_password() {
+        let password = "correct-password";
+        let wrong_password = "wrong-password";
+
+        // Generate a master key
+        let (_public_key, encrypted_private_key) =
+            generate_master_key(password).expect("Should generate master key successfully");
+
+        // Try to decrypt with wrong password
+        let result = decrypt_master_key(&encrypted_private_key, wrong_password);
+        assert!(result.is_err(), "Should fail with wrong password");
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_roundtrip() {
+        let test_data = b"Hello, World! This is secret data.";
+        let password = "test-password-789";
+
+        // Generate a key pair
+        let (_public_key, encrypted_private_key) =
+            generate_master_key(password).expect("Should generate master key");
+
+        let identity = decrypt_master_key(&encrypted_private_key, password)
+            .expect("Should decrypt master key");
+
+        // Encrypt data
+        let recipient = identity.to_public();
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![Box::new(recipient)];
+        let encrypted_data = encrypt_for_recipients(test_data, recipients)
+            .expect("Should encrypt data successfully");
+
+        // Decrypt data
+        let decrypted_data = decrypt_with_identity(&encrypted_data, &identity)
+            .expect("Should decrypt data successfully");
+
+        assert_eq!(
+            test_data,
+            decrypted_data.as_slice(),
+            "Decrypted data should match original"
+        );
+    }
+
+    #[test]
+    fn test_encrypt_for_recipients_empty_recipients() {
+        let test_data = b"test data";
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![];
+
+        let result = encrypt_for_recipients(test_data, recipients);
+        assert!(result.is_err(), "Should fail with empty recipients list");
+
+        match result.unwrap_err() {
+            LilVaultError::Internal { message } => {
+                assert!(
+                    message.contains("No recipients provided"),
+                    "Error should indicate no recipients"
+                );
+            }
+            _ => panic!("Expected Internal error"),
+        }
+    }
+
+    #[test]
+    fn test_decrypt_secret_with_vault_key() {
+        let test_data = b"secret vault data";
+        let password = "vault-password-123";
+
+        // Generate vault key
+        let (_public_key, encrypted_private_key) =
+            generate_master_key(password).expect("Should generate vault key");
+
+        let identity =
+            decrypt_master_key(&encrypted_private_key, password).expect("Should decrypt vault key");
+
+        // Encrypt data with the vault key
+        let recipient = identity.to_public();
+        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![Box::new(recipient)];
+        let encrypted_data =
+            encrypt_for_recipients(test_data, recipients).expect("Should encrypt data");
+
+        // Decrypt using vault key function
+        let decrypted_data =
+            decrypt_secret_with_vault_key(&encrypted_data, &encrypted_private_key, password)
+                .expect("Should decrypt with vault key");
+
+        assert_eq!(
+            test_data,
+            decrypted_data.as_slice(),
+            "Decrypted data should match original"
+        );
+    }
+
+    #[test]
+    fn test_parse_ssh_public_key_invalid() {
+        let invalid_key = "not-a-valid-ssh-key";
+        let result = parse_ssh_public_key(invalid_key);
+
+        assert!(result.is_err(), "Should fail with invalid SSH key");
+        match result.unwrap_err() {
+            LilVaultError::SshKey { message } => {
+                assert!(
+                    message.contains("Failed to parse SSH public key"),
+                    "Error should indicate SSH key parsing failure"
+                );
+            }
+            _ => panic!("Expected SshKey error"),
+        }
+    }
+}
