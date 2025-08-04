@@ -10,7 +10,7 @@ use lilvault::crypto::{
 };
 use lilvault::db::{
     Database,
-    models::{HostKey, Secret, SecretStorage, VaultKey},
+    models::{Key, Secret, SecretStorage},
 };
 use miette::{IntoDiagnostic, Result};
 use std::fs;
@@ -73,17 +73,18 @@ async fn main() -> Result<()> {
 
             // Create vault key record
             let now = Utc::now();
-            let vault_key = VaultKey {
+            let vault_key = Key {
                 fingerprint: fingerprint.clone(),
+                key_type: "vault".to_string(),
                 name: name.clone(),
                 public_key: public_key.clone(),
-                encrypted_private_key,
+                encrypted_private_key: Some(encrypted_private_key),
                 created_at: now,
                 updated_at: now,
             };
 
             // Store in database
-            db.insert_vault_key(&vault_key).await.into_diagnostic()?;
+            db.insert_key(&vault_key).await.into_diagnostic()?;
 
             println!("✓ Vault initialized successfully!");
             println!("  Vault key name: {name}");
@@ -121,17 +122,18 @@ async fn main() -> Result<()> {
 
                     // Create vault key record
                     let now = Utc::now();
-                    let vault_key = VaultKey {
+                    let vault_key = Key {
                         fingerprint: fingerprint.clone(),
+                        key_type: "vault".to_string(),
                         name: name.clone(),
                         public_key: public_key.clone(),
-                        encrypted_private_key,
+                        encrypted_private_key: Some(encrypted_private_key),
                         created_at: now,
                         updated_at: now,
                     };
 
                     // Store in database
-                    db.insert_vault_key(&vault_key).await.into_diagnostic()?;
+                    db.insert_key(&vault_key).await.into_diagnostic()?;
 
                     println!("✓ Vault key added successfully!");
                     println!("  Name: {name}");
@@ -213,16 +215,18 @@ async fn main() -> Result<()> {
 
                     // Create host key record
                     let now = Utc::now();
-                    let host_key = HostKey {
+                    let host_key = Key {
                         fingerprint: fingerprint.clone(),
-                        hostname: hostname.clone(),
+                        key_type: "host".to_string(),
+                        name: hostname.clone(),
                         public_key: ssh_public_key.to_string(),
+                        encrypted_private_key: None,
                         created_at: now,
                         updated_at: now,
                     };
 
                     // Store in database
-                    db.insert_host_key(&host_key).await.into_diagnostic()?;
+                    db.insert_key(&host_key).await.into_diagnostic()?;
 
                     println!("✓ Host key added successfully!");
                     println!("  Hostname: {hostname}");
@@ -245,7 +249,7 @@ async fn main() -> Result<()> {
                         println!(
                             "{:<16} {:<20} {}",
                             key.fingerprint,
-                            key.hostname,
+                            key.name,
                             key.created_at.format("%Y-%m-%d %H:%M:%S UTC")
                         );
                     }
@@ -470,7 +474,7 @@ async fn main() -> Result<()> {
 
                                         decrypt_secret_with_vault_key(
                                             &storage.encrypted_data,
-                                            &vault_key.encrypted_private_key,
+                                            vault_key.encrypted_private_key(),
                                             &password,
                                         )
                                         .into_diagnostic()?

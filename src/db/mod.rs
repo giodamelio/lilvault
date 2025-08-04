@@ -34,7 +34,7 @@ impl Database {
 
     /// Check if the vault is initialized (has at least one vault key)
     pub async fn is_initialized(&self) -> Result<bool> {
-        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM vault_keys")
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM keys WHERE key_type = 'vault'")
             .fetch_one(&self.pool)
             .await?;
 
@@ -65,40 +65,52 @@ impl Database {
         self.pool.close().await;
     }
 
-    // Vault Key Operations
+    // Key Operations (unified vault and host keys)
 
-    /// Insert a new vault key
-    pub async fn insert_vault_key(&self, vault_key: &VaultKey) -> Result<()> {
+    /// Insert a new key (vault or host)
+    pub async fn insert_key(&self, key: &Key) -> Result<()> {
         sqlx::query(
-            "INSERT INTO vault_keys (fingerprint, name, public_key, encrypted_private_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO keys (fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
-        .bind(&vault_key.fingerprint)
-        .bind(&vault_key.name)
-        .bind(&vault_key.public_key)
-        .bind(&vault_key.encrypted_private_key)
-        .bind(vault_key.created_at)
-        .bind(vault_key.updated_at)
+        .bind(&key.fingerprint)
+        .bind(&key.key_type)
+        .bind(&key.name)
+        .bind(&key.public_key)
+        .bind(&key.encrypted_private_key)
+        .bind(key.created_at)
+        .bind(key.updated_at)
         .execute(&self.pool)
         .await?;
 
         Ok(())
     }
 
-    /// Get all vault keys
-    pub async fn get_all_vault_keys(&self) -> Result<Vec<VaultKey>> {
-        let keys = sqlx::query_as::<_, VaultKey>(
-            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at, updated_at FROM vault_keys ORDER BY created_at"
+    /// Get all keys of a specific type
+    pub async fn get_keys_by_type(&self, key_type: &str) -> Result<Vec<Key>> {
+        let keys = sqlx::query_as::<_, Key>(
+            "SELECT fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at FROM keys WHERE key_type = ? ORDER BY name"
         )
+        .bind(key_type)
         .fetch_all(&self.pool)
         .await?;
 
         Ok(keys)
     }
 
-    /// Get vault key by fingerprint
-    pub async fn get_vault_key(&self, fingerprint: &str) -> Result<Option<VaultKey>> {
-        let key = sqlx::query_as::<_, VaultKey>(
-            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at, updated_at FROM vault_keys WHERE fingerprint = ?"
+    /// Get all vault keys
+    pub async fn get_all_vault_keys(&self) -> Result<Vec<Key>> {
+        self.get_keys_by_type("vault").await
+    }
+
+    /// Get all host keys
+    pub async fn get_all_host_keys(&self) -> Result<Vec<Key>> {
+        self.get_keys_by_type("host").await
+    }
+
+    /// Get key by fingerprint
+    pub async fn get_key(&self, fingerprint: &str) -> Result<Option<Key>> {
+        let key = sqlx::query_as::<_, Key>(
+            "SELECT fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at FROM keys WHERE fingerprint = ?"
         )
         .bind(fingerprint)
         .fetch_optional(&self.pool)
@@ -107,49 +119,22 @@ impl Database {
         Ok(key)
     }
 
-    /// Remove vault key by fingerprint
-    pub async fn remove_vault_key(&self, fingerprint: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM vault_keys WHERE fingerprint = ?")
-            .bind(fingerprint)
-            .execute(&self.pool)
-            .await?;
-
-        Ok(result.rows_affected() > 0)
-    }
-
-    // Host Key Operations
-
-    /// Insert a new host key
-    pub async fn insert_host_key(&self, host_key: &HostKey) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO host_keys (fingerprint, hostname, public_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+    /// Get vault key by fingerprint
+    pub async fn get_vault_key(&self, fingerprint: &str) -> Result<Option<Key>> {
+        let key = sqlx::query_as::<_, Key>(
+            "SELECT fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at FROM keys WHERE fingerprint = ? AND key_type = 'vault'"
         )
-        .bind(&host_key.fingerprint)
-        .bind(&host_key.hostname)
-        .bind(&host_key.public_key)
-        .bind(host_key.created_at)
-        .bind(host_key.updated_at)
-        .execute(&self.pool)
+        .bind(fingerprint)
+        .fetch_optional(&self.pool)
         .await?;
 
-        Ok(())
-    }
-
-    /// Get all host keys
-    pub async fn get_all_host_keys(&self) -> Result<Vec<HostKey>> {
-        let keys = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys ORDER BY hostname",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(keys)
+        Ok(key)
     }
 
     /// Get host key by hostname
-    pub async fn get_host_key_by_hostname(&self, hostname: &str) -> Result<Option<HostKey>> {
-        let key = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys WHERE hostname = ?",
+    pub async fn get_host_key_by_hostname(&self, hostname: &str) -> Result<Option<Key>> {
+        let key = sqlx::query_as::<_, Key>(
+            "SELECT fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at FROM keys WHERE name = ? AND key_type = 'host'"
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
@@ -159,9 +144,9 @@ impl Database {
     }
 
     /// Get host key by fingerprint
-    pub async fn get_host_key_by_fingerprint(&self, fingerprint: &str) -> Result<Option<HostKey>> {
-        let key = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys WHERE fingerprint = ?"
+    pub async fn get_host_key_by_fingerprint(&self, fingerprint: &str) -> Result<Option<Key>> {
+        let key = sqlx::query_as::<_, Key>(
+            "SELECT fingerprint, key_type, name, public_key, encrypted_private_key, created_at, updated_at FROM keys WHERE fingerprint = ? AND key_type = 'host'"
         )
         .bind(fingerprint)
         .fetch_optional(&self.pool)
@@ -170,9 +155,29 @@ impl Database {
         Ok(key)
     }
 
+    /// Remove key by fingerprint
+    pub async fn remove_key(&self, fingerprint: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM keys WHERE fingerprint = ?")
+            .bind(fingerprint)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Remove vault key by fingerprint
+    pub async fn remove_vault_key(&self, fingerprint: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM keys WHERE fingerprint = ? AND key_type = 'vault'")
+            .bind(fingerprint)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Remove host key by hostname
     pub async fn remove_host_key_by_hostname(&self, hostname: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM host_keys WHERE hostname = ?")
+        let result = sqlx::query("DELETE FROM keys WHERE name = ? AND key_type = 'host'")
             .bind(hostname)
             .execute(&self.pool)
             .await?;
@@ -182,7 +187,7 @@ impl Database {
 
     /// Remove host key by fingerprint
     pub async fn remove_host_key_by_fingerprint(&self, fingerprint: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM host_keys WHERE fingerprint = ?")
+        let result = sqlx::query("DELETE FROM keys WHERE fingerprint = ? AND key_type = 'host'")
             .bind(fingerprint)
             .execute(&self.pool)
             .await?;

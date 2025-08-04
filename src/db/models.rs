@@ -3,22 +3,38 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct VaultKey {
+pub struct Key {
     pub fingerprint: String,
+    pub key_type: String,
     pub name: String,
     pub public_key: String,
-    pub encrypted_private_key: Vec<u8>,
+    pub encrypted_private_key: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
-pub struct HostKey {
-    pub fingerprint: String,
-    pub hostname: String,
-    pub public_key: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+impl Key {
+    /// Returns true if this is a vault key
+    pub fn is_vault_key(&self) -> bool {
+        self.key_type == "vault"
+    }
+
+    /// Returns true if this is a host key
+    pub fn is_host_key(&self) -> bool {
+        self.key_type == "host"
+    }
+
+    /// Get the encrypted private key, panicking if this is not a vault key
+    pub fn encrypted_private_key(&self) -> &[u8] {
+        self.encrypted_private_key
+            .as_ref()
+            .expect("encrypted_private_key is only available for vault keys")
+    }
+
+    /// Get the hostname (for host keys) or name (for vault keys)
+    pub fn display_name(&self) -> &str {
+        &self.name
+    }
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -62,12 +78,13 @@ mod tests {
 
     #[test]
     fn test_vault_key_serialization() {
-        let vault_key = VaultKey {
+        let vault_key = Key {
             fingerprint: "abc123".to_string(),
+            key_type: "vault".to_string(),
             name: "test-key".to_string(),
             public_key: "age1ql3n4n93j3j4l2a3rk6t3q3q5z3a4a5a6a7a8a9a0a1a2a3a4a5a6a7a8a9a0a1"
                 .to_string(),
-            encrypted_private_key: b"encrypted_data".to_vec(),
+            encrypted_private_key: Some(b"encrypted_data".to_vec()),
             created_at: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
         };
@@ -76,11 +93,12 @@ mod tests {
         let json = serde_json::to_string(&vault_key).expect("Should serialize to JSON");
         assert!(json.contains("abc123"));
         assert!(json.contains("test-key"));
+        assert!(json.contains("vault"));
 
         // Test JSON deserialization
-        let deserialized: VaultKey =
-            serde_json::from_str(&json).expect("Should deserialize from JSON");
+        let deserialized: Key = serde_json::from_str(&json).expect("Should deserialize from JSON");
         assert_eq!(deserialized.fingerprint, vault_key.fingerprint);
+        assert_eq!(deserialized.key_type, vault_key.key_type);
         assert_eq!(deserialized.name, vault_key.name);
         assert_eq!(deserialized.public_key, vault_key.public_key);
         assert_eq!(
@@ -90,13 +108,14 @@ mod tests {
         assert_eq!(deserialized.created_at, vault_key.created_at);
         assert_eq!(deserialized.updated_at, vault_key.updated_at);
     }
-
     #[test]
     fn test_host_key_serialization() {
-        let host_key = HostKey {
+        let host_key = Key {
             fingerprint: "def456".to_string(),
-            hostname: "server1".to_string(),
+            key_type: "host".to_string(),
+            name: "server1".to_string(),
             public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB test@example.com".to_string(),
+            encrypted_private_key: None,
             created_at: Utc.with_ymd_and_hms(2024, 2, 1, 10, 30, 0).unwrap(),
             updated_at: Utc.with_ymd_and_hms(2024, 2, 1, 10, 30, 0).unwrap(),
         };
@@ -107,15 +126,18 @@ mod tests {
         assert!(json.contains("server1"));
 
         // Test JSON deserialization
-        let deserialized: HostKey =
-            serde_json::from_str(&json).expect("Should deserialize from JSON");
+        let deserialized: Key = serde_json::from_str(&json).expect("Should deserialize from JSON");
         assert_eq!(deserialized.fingerprint, host_key.fingerprint);
-        assert_eq!(deserialized.hostname, host_key.hostname);
+        assert_eq!(deserialized.key_type, host_key.key_type);
+        assert_eq!(deserialized.name, host_key.name);
         assert_eq!(deserialized.public_key, host_key.public_key);
+        assert_eq!(
+            deserialized.encrypted_private_key,
+            host_key.encrypted_private_key
+        );
         assert_eq!(deserialized.created_at, host_key.created_at);
         assert_eq!(deserialized.updated_at, host_key.updated_at);
     }
-
     #[test]
     fn test_secret_serialization() {
         let secret = Secret {
