@@ -15,6 +15,10 @@ LilVault is a single-file SQLite-based secrets manager that allows you to safely
 - **Audit logging**: Simple debugging-focused audit trail for all operations
 - **Safe distribution**: Vault file can be copied to any host - they only see their secrets
 
+## Development Principles
+
+- Never modify existing migrations
+
 ## Architecture
 
 ### Encryption Strategy
@@ -102,10 +106,21 @@ END;
 When creating new tables, ensure you:
 1. ✅ Include `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
 2. ✅ Include `updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
-3. ✅ Create corresponding `updated_at` trigger (see migration 002 for examples)
+3. ✅ Create corresponding `updated_at` trigger (see migration 001 for examples)
 4. ✅ Update the Rust model struct to include both timestamp fields
 5. ✅ Update all database queries to handle the new columns
 6. ✅ Add unit tests for the new model serialization/deserialization
+7. ✅ Run `dump-schema` to update `db/schema.sql`
+
+### Schema Documentation
+The project maintains a `db/schema.sql` file (similar to Rails' `db/schema.rb`) that contains the complete, up-to-date database schema. This file is:
+
+- **Auto-generated** from the current migration state
+- **Read-only** - never edit directly, create migrations instead
+- **Version controlled** for easy schema diffing and understanding
+- **Updated** automatically on devenv entry and manually via `dump-schema`
+
+This provides a single source of truth for the current database structure without needing to piece together multiple migration files.
 
 ## Technology Stack
 
@@ -204,8 +219,9 @@ cargo test
 # Run with debug logging
 RUST_LOG=debug cargo run
 
-# Database migrations
-cargo run -- migrate
+# Database operations
+cargo run -- migrate         # Apply pending migrations (if any)
+dump-schema                  # Generate db/schema.sql from current state
 
 # Lint and format
 cargo clippy

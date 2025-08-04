@@ -15,7 +15,8 @@
       "Bash(cargo clippy:*)",
       "Bash(git reset:*)",
       "Bash(find:*)",
-      "Bash(cargo test)"
+      "Bash(cargo test)",
+      "Bash(cargo test:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
