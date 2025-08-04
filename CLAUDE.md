@@ -30,7 +30,8 @@ CREATE TABLE vault_keys (
     name TEXT NOT NULL,
     public_key TEXT NOT NULL,
     encrypted_private_key BLOB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Host keys (SSH public keys)
@@ -38,7 +39,8 @@ CREATE TABLE host_keys (
     fingerprint TEXT PRIMARY KEY,
     hostname TEXT NOT NULL,
     public_key TEXT NOT NULL,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Secret metadata
@@ -46,7 +48,8 @@ CREATE TABLE secrets (
     name TEXT PRIMARY KEY,
     description TEXT,
     template TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Low-level secret storage (one row per secret+version+key)
@@ -55,24 +58,54 @@ CREATE TABLE secret_storage (
     secret_name TEXT NOT NULL,
     version INTEGER NOT NULL,
     key_fingerprint TEXT NOT NULL,
-    key_type TEXT NOT NULL CHECK(key_type IN ('master', 'host')),
+    key_type TEXT NOT NULL CHECK(key_type IN ('vault', 'host')),
     encrypted_data BLOB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(secret_name, version, key_fingerprint)
 );
 
 -- Simple audit log for debugging
 CREATE TABLE audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     operation TEXT NOT NULL,
     resource TEXT NOT NULL,
     details TEXT,
     version INTEGER,
     success BOOLEAN NOT NULL DEFAULT true,
-    error_message TEXT
+    error_message TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+## Database Standards
+
+### Required Columns for All Tables
+Every table MUST include these timestamp columns:
+- `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` - When the record was first created
+- `updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` - When the record was last modified
+
+### Automatic updated_at Triggers
+All tables have automatic triggers that update `updated_at` when records are modified:
+```sql
+CREATE TRIGGER table_name_updated_at
+    AFTER UPDATE ON table_name
+    FOR EACH ROW
+    WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE table_name SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+```
+
+### Table Creation Checklist
+When creating new tables, ensure you:
+1. ✅ Include `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+2. ✅ Include `updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`
+3. ✅ Create corresponding `updated_at` trigger (see migration 002 for examples)
+4. ✅ Update the Rust model struct to include both timestamp fields
+5. ✅ Update all database queries to handle the new columns
+6. ✅ Add unit tests for the new model serialization/deserialization
 
 ## Technology Stack
 

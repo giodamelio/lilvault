@@ -9,6 +9,7 @@ pub struct VaultKey {
     pub public_key: String,
     pub encrypted_private_key: Vec<u8>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -16,7 +17,8 @@ pub struct HostKey {
     pub fingerprint: String,
     pub hostname: String,
     pub public_key: String,
-    pub added_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -25,6 +27,7 @@ pub struct Secret {
     pub description: Option<String>,
     pub template: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
@@ -36,18 +39,20 @@ pub struct SecretStorage {
     pub key_type: String,
     pub encrypted_data: Vec<u8>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct AuditLog {
     pub id: i64,
-    pub timestamp: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
     pub operation: String,
     pub resource: String,
     pub details: Option<String>,
     pub version: Option<i64>,
     pub success: bool,
     pub error_message: Option<String>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[cfg(test)]
@@ -64,6 +69,7 @@ mod tests {
                 .to_string(),
             encrypted_private_key: b"encrypted_data".to_vec(),
             created_at: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap(),
         };
 
         // Test JSON serialization
@@ -82,6 +88,7 @@ mod tests {
             vault_key.encrypted_private_key
         );
         assert_eq!(deserialized.created_at, vault_key.created_at);
+        assert_eq!(deserialized.updated_at, vault_key.updated_at);
     }
 
     #[test]
@@ -90,7 +97,8 @@ mod tests {
             fingerprint: "def456".to_string(),
             hostname: "server1".to_string(),
             public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB test@example.com".to_string(),
-            added_at: Utc.with_ymd_and_hms(2024, 2, 1, 10, 30, 0).unwrap(),
+            created_at: Utc.with_ymd_and_hms(2024, 2, 1, 10, 30, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 2, 1, 10, 30, 0).unwrap(),
         };
 
         // Test JSON serialization
@@ -104,7 +112,8 @@ mod tests {
         assert_eq!(deserialized.fingerprint, host_key.fingerprint);
         assert_eq!(deserialized.hostname, host_key.hostname);
         assert_eq!(deserialized.public_key, host_key.public_key);
-        assert_eq!(deserialized.added_at, host_key.added_at);
+        assert_eq!(deserialized.created_at, host_key.created_at);
+        assert_eq!(deserialized.updated_at, host_key.updated_at);
     }
 
     #[test]
@@ -114,6 +123,7 @@ mod tests {
             description: Some("Test secret description".to_string()),
             template: None,
             created_at: Utc.with_ymd_and_hms(2024, 3, 1, 14, 15, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 3, 1, 14, 15, 0).unwrap(),
         };
 
         // Test JSON serialization
@@ -128,6 +138,7 @@ mod tests {
         assert_eq!(deserialized.description, secret.description);
         assert_eq!(deserialized.template, secret.template);
         assert_eq!(deserialized.created_at, secret.created_at);
+        assert_eq!(deserialized.updated_at, secret.updated_at);
     }
 
     #[test]
@@ -140,6 +151,7 @@ mod tests {
             key_type: "vault".to_string(),
             encrypted_data: b"secret_encrypted_data".to_vec(),
             created_at: Utc.with_ymd_and_hms(2024, 4, 1, 16, 45, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 4, 1, 16, 45, 0).unwrap(),
         };
 
         // Test JSON serialization
@@ -158,19 +170,21 @@ mod tests {
         assert_eq!(deserialized.key_type, storage.key_type);
         assert_eq!(deserialized.encrypted_data, storage.encrypted_data);
         assert_eq!(deserialized.created_at, storage.created_at);
+        assert_eq!(deserialized.updated_at, storage.updated_at);
     }
 
     #[test]
     fn test_audit_log_serialization() {
         let audit_entry = AuditLog {
             id: 10,
-            timestamp: Utc.with_ymd_and_hms(2024, 5, 1, 9, 20, 0).unwrap(),
+            created_at: Utc.with_ymd_and_hms(2024, 5, 1, 9, 20, 0).unwrap(),
             operation: "store_secret".to_string(),
             resource: "my-secret".to_string(),
             details: Some("Secret stored successfully".to_string()),
             version: Some(1),
             success: true,
             error_message: None,
+            updated_at: Utc.with_ymd_and_hms(2024, 5, 1, 9, 20, 0).unwrap(),
         };
 
         // Test JSON serialization
@@ -183,7 +197,8 @@ mod tests {
         let deserialized: AuditLog =
             serde_json::from_str(&json).expect("Should deserialize from JSON");
         assert_eq!(deserialized.id, audit_entry.id);
-        assert_eq!(deserialized.timestamp, audit_entry.timestamp);
+        assert_eq!(deserialized.created_at, audit_entry.created_at);
+        assert_eq!(deserialized.updated_at, audit_entry.updated_at);
         assert_eq!(deserialized.operation, audit_entry.operation);
         assert_eq!(deserialized.resource, audit_entry.resource);
         assert_eq!(deserialized.details, audit_entry.details);
@@ -199,6 +214,7 @@ mod tests {
             description: None,
             template: Some("Hello {{username}}!".to_string()),
             created_at: Utc.with_ymd_and_hms(2024, 6, 1, 11, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 6, 1, 11, 0, 0).unwrap(),
         };
 
         let json = serde_json::to_string(&secret).expect("Should serialize to JSON");
@@ -216,13 +232,14 @@ mod tests {
     fn test_audit_log_with_error() {
         let audit_entry = AuditLog {
             id: 11,
-            timestamp: Utc.with_ymd_and_hms(2024, 5, 2, 10, 30, 0).unwrap(),
+            created_at: Utc.with_ymd_and_hms(2024, 5, 2, 10, 30, 0).unwrap(),
             operation: "decrypt_secret".to_string(),
             resource: "failed-secret".to_string(),
             details: None,
             version: Some(2),
             success: false,
             error_message: Some("Invalid password".to_string()),
+            updated_at: Utc.with_ymd_and_hms(2024, 5, 2, 10, 30, 0).unwrap(),
         };
 
         let json = serde_json::to_string(&audit_entry).expect("Should serialize to JSON");

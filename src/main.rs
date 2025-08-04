@@ -72,12 +72,14 @@ async fn main() -> Result<()> {
             let fingerprint = generate_fingerprint(&public_key);
 
             // Create vault key record
+            let now = Utc::now();
             let vault_key = VaultKey {
                 fingerprint: fingerprint.clone(),
                 name: name.clone(),
                 public_key: public_key.clone(),
                 encrypted_private_key,
-                created_at: Utc::now(),
+                created_at: now,
+                updated_at: now,
             };
 
             // Store in database
@@ -118,12 +120,14 @@ async fn main() -> Result<()> {
                     let fingerprint = generate_fingerprint(&public_key);
 
                     // Create vault key record
+                    let now = Utc::now();
                     let vault_key = VaultKey {
                         fingerprint: fingerprint.clone(),
                         name: name.clone(),
                         public_key: public_key.clone(),
                         encrypted_private_key,
-                        created_at: Utc::now(),
+                        created_at: now,
+                        updated_at: now,
                     };
 
                     // Store in database
@@ -208,11 +212,13 @@ async fn main() -> Result<()> {
                     let fingerprint = generate_fingerprint(ssh_public_key);
 
                     // Create host key record
+                    let now = Utc::now();
                     let host_key = HostKey {
                         fingerprint: fingerprint.clone(),
                         hostname: hostname.clone(),
                         public_key: ssh_public_key.to_string(),
-                        added_at: Utc::now(),
+                        created_at: now,
+                        updated_at: now,
                     };
 
                     // Store in database
@@ -240,7 +246,7 @@ async fn main() -> Result<()> {
                             "{:<16} {:<20} {}",
                             key.fingerprint,
                             key.hostname,
-                            key.added_at.format("%Y-%m-%d %H:%M:%S UTC")
+                            key.created_at.format("%Y-%m-%d %H:%M:%S UTC")
                         );
                     }
                 }
@@ -358,11 +364,13 @@ async fn main() -> Result<()> {
                     // Create or update secret metadata
                     let secret_exists = db.get_secret(&name).await.into_diagnostic()?.is_some();
                     if !secret_exists {
+                        let now = Utc::now();
                         let secret = Secret {
                             name: name.clone(),
                             description: description.clone(),
                             template: None,
-                            created_at: Utc::now(),
+                            created_at: now,
+                            updated_at: now,
                         };
                         db.insert_secret(&secret).await.into_diagnostic()?;
                     }
@@ -378,6 +386,7 @@ async fn main() -> Result<()> {
                         let encrypted_data = encrypt_for_recipients(&secret_data, vec![recipient])
                             .into_diagnostic()?;
 
+                        let now = Utc::now();
                         let storage_entry = SecretStorage {
                             id: 0, // Will be set by database
                             secret_name: name.clone(),
@@ -385,7 +394,8 @@ async fn main() -> Result<()> {
                             key_fingerprint: key_fingerprint.clone(),
                             key_type: key_type.clone(),
                             encrypted_data,
-                            created_at: Utc::now(),
+                            created_at: now,
+                            updated_at: now,
                         };
 
                         db.insert_secret_storage(&storage_entry)

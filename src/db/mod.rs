@@ -70,13 +70,14 @@ impl Database {
     /// Insert a new vault key
     pub async fn insert_vault_key(&self, vault_key: &VaultKey) -> Result<()> {
         sqlx::query(
-            "INSERT INTO vault_keys (fingerprint, name, public_key, encrypted_private_key, created_at) VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO vault_keys (fingerprint, name, public_key, encrypted_private_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
         )
         .bind(&vault_key.fingerprint)
         .bind(&vault_key.name)
         .bind(&vault_key.public_key)
         .bind(&vault_key.encrypted_private_key)
         .bind(vault_key.created_at)
+        .bind(vault_key.updated_at)
         .execute(&self.pool)
         .await?;
 
@@ -86,7 +87,7 @@ impl Database {
     /// Get all vault keys
     pub async fn get_all_vault_keys(&self) -> Result<Vec<VaultKey>> {
         let keys = sqlx::query_as::<_, VaultKey>(
-            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at FROM vault_keys ORDER BY created_at"
+            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at, updated_at FROM vault_keys ORDER BY created_at"
         )
         .fetch_all(&self.pool)
         .await?;
@@ -97,7 +98,7 @@ impl Database {
     /// Get vault key by fingerprint
     pub async fn get_vault_key(&self, fingerprint: &str) -> Result<Option<VaultKey>> {
         let key = sqlx::query_as::<_, VaultKey>(
-            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at FROM vault_keys WHERE fingerprint = ?"
+            "SELECT fingerprint, name, public_key, encrypted_private_key, created_at, updated_at FROM vault_keys WHERE fingerprint = ?"
         )
         .bind(fingerprint)
         .fetch_optional(&self.pool)
@@ -121,12 +122,13 @@ impl Database {
     /// Insert a new host key
     pub async fn insert_host_key(&self, host_key: &HostKey) -> Result<()> {
         sqlx::query(
-            "INSERT INTO host_keys (fingerprint, hostname, public_key, added_at) VALUES (?, ?, ?, ?)"
+            "INSERT INTO host_keys (fingerprint, hostname, public_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
         )
         .bind(&host_key.fingerprint)
         .bind(&host_key.hostname)
         .bind(&host_key.public_key)
-        .bind(host_key.added_at)
+        .bind(host_key.created_at)
+        .bind(host_key.updated_at)
         .execute(&self.pool)
         .await?;
 
@@ -136,7 +138,7 @@ impl Database {
     /// Get all host keys
     pub async fn get_all_host_keys(&self) -> Result<Vec<HostKey>> {
         let keys = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, added_at FROM host_keys ORDER BY hostname",
+            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys ORDER BY hostname",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -147,7 +149,7 @@ impl Database {
     /// Get host key by hostname
     pub async fn get_host_key_by_hostname(&self, hostname: &str) -> Result<Option<HostKey>> {
         let key = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, added_at FROM host_keys WHERE hostname = ?",
+            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys WHERE hostname = ?",
         )
         .bind(hostname)
         .fetch_optional(&self.pool)
@@ -159,7 +161,7 @@ impl Database {
     /// Get host key by fingerprint
     pub async fn get_host_key_by_fingerprint(&self, fingerprint: &str) -> Result<Option<HostKey>> {
         let key = sqlx::query_as::<_, HostKey>(
-            "SELECT fingerprint, hostname, public_key, added_at FROM host_keys WHERE fingerprint = ?"
+            "SELECT fingerprint, hostname, public_key, created_at, updated_at FROM host_keys WHERE fingerprint = ?"
         )
         .bind(fingerprint)
         .fetch_optional(&self.pool)
@@ -193,12 +195,13 @@ impl Database {
     /// Insert a new secret metadata
     pub async fn insert_secret(&self, secret: &Secret) -> Result<()> {
         sqlx::query(
-            "INSERT INTO secrets (name, description, template, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO secrets (name, description, template, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         )
         .bind(&secret.name)
         .bind(&secret.description)
         .bind(&secret.template)
         .bind(secret.created_at)
+        .bind(secret.updated_at)
         .execute(&self.pool)
         .await?;
 
@@ -208,7 +211,7 @@ impl Database {
     /// Get secret metadata by name
     pub async fn get_secret(&self, name: &str) -> Result<Option<Secret>> {
         let secret = sqlx::query_as::<_, Secret>(
-            "SELECT name, description, template, created_at FROM secrets WHERE name = ?",
+            "SELECT name, description, template, created_at, updated_at FROM secrets WHERE name = ?",
         )
         .bind(name)
         .fetch_optional(&self.pool)
@@ -220,7 +223,7 @@ impl Database {
     /// Get all secrets
     pub async fn get_all_secrets(&self) -> Result<Vec<Secret>> {
         let secrets = sqlx::query_as::<_, Secret>(
-            "SELECT name, description, template, created_at FROM secrets ORDER BY name",
+            "SELECT name, description, template, created_at, updated_at FROM secrets ORDER BY name",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -231,7 +234,7 @@ impl Database {
     /// Insert secret storage entry (encrypted data for a specific key)
     pub async fn insert_secret_storage(&self, storage: &SecretStorage) -> Result<()> {
         sqlx::query(
-            "INSERT INTO secret_storage (secret_name, version, key_fingerprint, key_type, encrypted_data, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO secret_storage (secret_name, version, key_fingerprint, key_type, encrypted_data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&storage.secret_name)
         .bind(storage.version)
@@ -239,6 +242,7 @@ impl Database {
         .bind(&storage.key_type)
         .bind(&storage.encrypted_data)
         .bind(storage.created_at)
+        .bind(storage.updated_at)
         .execute(&self.pool)
         .await?;
 
@@ -263,7 +267,7 @@ impl Database {
         version: i64,
     ) -> Result<Vec<SecretStorage>> {
         let entries = sqlx::query_as::<_, SecretStorage>(
-            "SELECT id, secret_name, version, key_fingerprint, key_type, encrypted_data, created_at FROM secret_storage WHERE secret_name = ? AND version = ? ORDER BY key_type, key_fingerprint"
+            "SELECT id, secret_name, version, key_fingerprint, key_type, encrypted_data, created_at, updated_at FROM secret_storage WHERE secret_name = ? AND version = ? ORDER BY key_type, key_fingerprint"
         )
         .bind(secret_name)
         .bind(version)
@@ -281,7 +285,7 @@ impl Database {
         key_fingerprint: &str,
     ) -> Result<Option<SecretStorage>> {
         let entry = sqlx::query_as::<_, SecretStorage>(
-            "SELECT id, secret_name, version, key_fingerprint, key_type, encrypted_data, created_at FROM secret_storage WHERE secret_name = ? AND version = ? AND key_fingerprint = ?"
+            "SELECT id, secret_name, version, key_fingerprint, key_type, encrypted_data, created_at, updated_at FROM secret_storage WHERE secret_name = ? AND version = ? AND key_fingerprint = ?"
         )
         .bind(secret_name)
         .bind(version)
