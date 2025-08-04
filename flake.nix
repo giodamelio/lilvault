@@ -277,6 +277,9 @@
 
               # Claude Code
               claude-code
+
+              # A built copy of program
+              lilvault
             ]
             ++
             # All the formatter programs
