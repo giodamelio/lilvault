@@ -62,6 +62,9 @@
         # Fenix Rust toolchain
         rustToolchain = inputs.fenix.packages.${system}.stable.toolchain;
 
+        # Read Cargo.toml for package metadata
+        cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+
         # MCP configuration
         mcpConfig = inputs.mcp-servers.lib.mkConfig pkgs {
           format = "json";
@@ -91,8 +94,8 @@
             cargo = rustToolchain;
             rustc = rustToolchain;
           }).buildRustPackage {
-            pname = "lilvault";
-            version = "0.1.0";
+            pname = cargoToml.package.name;
+            version = cargoToml.package.version;
 
             src = pkgs.lib.cleanSource ./.;
 
@@ -119,11 +122,11 @@
             doCheck = false;
 
             meta = with pkgs.lib; {
-              description = "A secure, encrypted secrets management system for homelabs";
-              homepage = "https://github.com/yourusername/lilvault";
+              description = cargoToml.package.description;
+              homepage = cargoToml.package.repository;
               license = with licenses; [mit asl20];
               maintainers = [];
-              mainProgram = "lilvault";
+              mainProgram = cargoToml.package.name;
             };
           };
       in {
