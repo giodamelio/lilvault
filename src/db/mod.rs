@@ -445,6 +445,84 @@ impl Database {
         self.insert_audit_entry(&audit_entry).await
     }
 
+    /// Get all secrets that need re-encryption for a new key
+    pub async fn get_secrets_for_reencryption(&self) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT DISTINCT name FROM secrets ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    /// Get all existing encrypted versions of a secret (for re-encryption)
+    pub async fn get_all_secret_versions(&self, secret_name: &str) -> Result<Vec<i64>> {
+        let rows: Vec<(i64,)> = sqlx::query_as(
+            "SELECT DISTINCT version FROM secret_storage WHERE secret_name = ? ORDER BY version DESC"
+        )
+        .bind(secret_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    /// Get an encrypted secret copy that can be decrypted (for re-encryption source)
+    pub async fn get_decryptable_secret_copy(
+        &self,
+        secret_name: &str,
+        version: i64,
+        available_key_fingerprints: &[String],
+    ) -> Result<Option<SecretStorage>> {
+        if available_key_fingerprints.is_empty() {
+            return Ok(None);
+        }
+
+        // Build placeholders for the IN clause
+        let placeholders = available_key_fingerprints
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let query = format!(
+            "SELECT id, secret_name, version, key_fingerprint, key_type, encrypted_data, created_at, updated_at
+             FROM secret_storage
+             WHERE secret_name = ? AND version = ? AND key_fingerprint IN ({placeholders})
+             LIMIT 1"
+        );
+
+        let mut query_builder = sqlx::query_as::<_, SecretStorage>(&query)
+            .bind(secret_name)
+            .bind(version);
+
+        for fingerprint in available_key_fingerprints {
+            query_builder = query_builder.bind(fingerprint);
+        }
+
+        let result = query_builder.fetch_optional(&self.pool).await?;
+        Ok(result)
+    }
+
+    /// Check if a secret version is already encrypted for a specific key
+    pub async fn is_secret_encrypted_for_key(
+        &self,
+        secret_name: &str,
+        version: i64,
+        key_fingerprint: &str,
+    ) -> Result<bool> {
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM secret_storage WHERE secret_name = ? AND version = ? AND key_fingerprint = ?"
+        )
+        .bind(secret_name)
+        .bind(version)
+        .bind(key_fingerprint)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count.0 > 0)
+    }
+
     /// Get comprehensive information about a secret without exposing the data
     pub async fn get_secret_info(&self, secret_name: &str) -> Result<Option<SecretInfo>> {
         // Get secret metadata

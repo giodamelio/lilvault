@@ -233,6 +233,31 @@ pub fn get_password(prompt: &str, password_file: Option<&std::path::Path>) -> Re
     }
 }
 
+/// Convert vault key to age recipient for encryption
+pub fn vault_key_to_recipient(public_key: &str) -> Result<Box<dyn age::Recipient + Send>> {
+    let recipient =
+        public_key
+            .parse::<age::x25519::Recipient>()
+            .map_err(|e| LilVaultError::Internal {
+                message: format!("Failed to parse vault public key: {e}"),
+            })?;
+    Ok(Box::new(recipient))
+}
+
+/// Convert host SSH key to age recipient for encryption
+pub fn host_key_to_recipient(ssh_public_key: &str) -> Result<Box<dyn age::Recipient + Send>> {
+    let recipient = parse_ssh_public_key(ssh_public_key)?;
+    Ok(Box::new(recipient))
+}
+
+/// Encrypt data for a single recipient (used for re-encryption)
+pub fn encrypt_for_single_recipient(
+    data: &[u8],
+    recipient: Box<dyn age::Recipient + Send>,
+) -> Result<Vec<u8>> {
+    encrypt_for_recipients(data, vec![recipient])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -58,6 +58,9 @@ pub enum KeyCommands {
         /// Path to file containing the password (for non-interactive use)
         #[arg(long)]
         password_file: Option<PathBuf>,
+        /// Skip re-encrypting existing secrets for this new key
+        #[arg(long)]
+        no_reencrypt: bool,
     },
 
     /// Add a host key
@@ -66,6 +69,9 @@ pub enum KeyCommands {
         hostname: String,
         /// Path to SSH public key file
         key_path: PathBuf,
+        /// Skip re-encrypting existing secrets for this new key
+        #[arg(long)]
+        no_reencrypt: bool,
     },
 
     /// Scan and import host keys like ssh-keyscan

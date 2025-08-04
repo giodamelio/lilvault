@@ -4,8 +4,9 @@ use clap::Parser;
 use dialoguer::Select;
 use lilvault::cli::{AuditCommands, Cli, Commands, KeyCommands, SecretCommands};
 use lilvault::crypto::{
-    decrypt_secret_with_vault_key, encrypt_for_recipients, generate_fingerprint,
-    generate_master_key, get_password, parse_ssh_public_key,
+    decrypt_master_key, decrypt_secret_with_vault_key, decrypt_with_identity,
+    encrypt_for_recipients, generate_fingerprint, generate_master_key, get_password,
+    host_key_to_recipient, parse_ssh_public_key, vault_key_to_recipient,
 };
 use lilvault::db::{
     Database,
@@ -21,6 +22,199 @@ async fn ensure_initialized(db: &Database) -> Result<()> {
         error!("Vault not initialized. Run 'lilvault init' first.");
         std::process::exit(1);
     }
+    Ok(())
+}
+
+/// Re-encrypt all existing secrets for a new key
+async fn reencrypt_secrets_for_new_key(
+    db: &Database,
+    new_key: &Key,
+    vault_keys: &[Key],
+    all_keys: &[Key],
+) -> Result<()> {
+    info!(
+        "🔄 Creating new versions of existing secrets for new key: {}",
+        new_key.name
+    );
+
+    // Get all secrets that need re-encryption
+    let secret_names = db.get_secrets_for_reencryption().await.into_diagnostic()?;
+
+    if secret_names.is_empty() {
+        info!("No existing secrets to re-encrypt");
+        return Ok(());
+    }
+
+    info!(
+        "Found {} secret(s) to create new versions for",
+        secret_names.len()
+    );
+
+    // Get vault key fingerprints for decryption (we need at least one to decrypt)
+    let vault_key_fingerprints: Vec<String> =
+        vault_keys.iter().map(|k| k.fingerprint.clone()).collect();
+
+    // Cache for decrypted vault key identities (fingerprint -> Identity)
+    let mut decrypted_identities: std::collections::HashMap<String, age::x25519::Identity> =
+        std::collections::HashMap::new();
+
+    let mut new_versions_created = 0;
+
+    for secret_name in &secret_names {
+        info!("Processing secret: {secret_name}");
+
+        // Get the latest version of this secret to use as source
+        let latest_version = match db
+            .get_latest_secret_version(secret_name)
+            .await
+            .into_diagnostic()?
+        {
+            Some(v) => v,
+            None => {
+                warn!("  No versions found for secret {secret_name}, skipping");
+                continue;
+            }
+        };
+
+        // Get a copy we can decrypt from the latest version
+        let source_copy = db
+            .get_decryptable_secret_copy(secret_name, latest_version, &vault_key_fingerprints)
+            .await
+            .into_diagnostic()?;
+
+        let source_copy = match source_copy {
+            Some(copy) => copy,
+            None => {
+                warn!("  No decryptable copy found for latest version, skipping");
+                continue;
+            }
+        };
+
+        // Find the vault key that can decrypt this copy
+        let vault_key = vault_keys
+            .iter()
+            .find(|k| k.fingerprint == source_copy.key_fingerprint)
+            .expect("Vault key should exist");
+
+        // Get or decrypt the identity for this vault key (with caching)
+        let identity = match decrypted_identities.get(&vault_key.fingerprint) {
+            Some(identity) => identity.clone(),
+            None => {
+                // Prompt for password only once per vault key
+                let password = get_password(
+                    &format!(
+                        "Enter password for vault key '{}' to decrypt secrets for new version creation",
+                        vault_key.name
+                    ),
+                    None,
+                )
+                .into_diagnostic()?;
+
+                // Decrypt the vault key identity
+                let identity = decrypt_master_key(
+                    vault_key
+                        .encrypted_private_key
+                        .as_ref()
+                        .expect("Vault key should have private key"),
+                    &password,
+                )
+                .into_diagnostic()?;
+
+                // Cache the decrypted identity
+                decrypted_identities.insert(vault_key.fingerprint.clone(), identity.clone());
+                identity
+            }
+        };
+
+        // Decrypt the secret data using the cached identity
+        let decrypted_data =
+            decrypt_with_identity(&source_copy.encrypted_data, &identity).into_diagnostic()?;
+
+        // Get the next version number for this secret
+        let new_version = db
+            .get_next_secret_version(secret_name)
+            .await
+            .into_diagnostic()?;
+
+        // Create recipients for ALL keys (existing + new key)
+        let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+
+        for key in all_keys {
+            let recipient = match key.key_type.as_str() {
+                "vault" => vault_key_to_recipient(&key.public_key).into_diagnostic()?,
+                "host" => host_key_to_recipient(&key.public_key).into_diagnostic()?,
+                _ => {
+                    error!("Unknown key type: {}", key.key_type);
+                    continue;
+                }
+            };
+            recipients.push(recipient);
+        }
+
+        // Encrypt the secret for all recipients
+        let encrypted_data =
+            encrypt_for_recipients(&decrypted_data, recipients).into_diagnostic()?;
+
+        // Store encrypted copies for each key
+        let mut stored_count = 0;
+        for key in all_keys {
+            let new_storage = SecretStorage {
+                id: 0, // Will be auto-generated
+                secret_name: secret_name.clone(),
+                version: new_version,
+                key_fingerprint: key.fingerprint.clone(),
+                key_type: key.key_type.clone(),
+                encrypted_data: encrypted_data.clone(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            db.insert_secret_storage(&new_storage)
+                .await
+                .into_diagnostic()?;
+            stored_count += 1;
+        }
+
+        // Log audit entry for this specific secret's new version
+        db.log_audit(
+            "CREATE_SECRET_VERSION",
+            secret_name,
+            Some(&format!(
+                "Created version {new_version} with encryption for new key '{}' (total {} keys)",
+                new_key.name,
+                all_keys.len()
+            )),
+            Some(new_version),
+            true,
+            None,
+        )
+        .await
+        .into_diagnostic()?;
+
+        info!("  ✓ Created version {new_version} encrypted for {stored_count} keys");
+        new_versions_created += 1;
+    }
+
+    info!(
+        "✅ Re-encryption complete: {} new secret versions created",
+        new_versions_created
+    );
+
+    // Log the overall re-encryption operation
+    db.log_audit(
+        "REENCRYPT_FOR_NEW_KEY",
+        &format!("new_key:{}", new_key.fingerprint),
+        Some(&format!(
+            "Created new versions of {new_versions_created} secrets for new key '{}'",
+            new_key.name
+        )),
+        None,
+        true,
+        None,
+    )
+    .await
+    .into_diagnostic()?;
+
     Ok(())
 }
 
@@ -114,6 +308,7 @@ async fn main() -> Result<()> {
                 KeyCommands::AddVault {
                     name,
                     password_file,
+                    no_reencrypt,
                 } => {
                     // Get password
                     let password = if let Some(path) = password_file {
@@ -151,6 +346,18 @@ async fn main() -> Result<()> {
                     // Store in database
                     db.insert_key(&vault_key).await.into_diagnostic()?;
 
+                    // Re-encrypt existing secrets for the new vault key (unless disabled)
+                    if !no_reencrypt {
+                        let all_vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+                        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+                        let mut all_keys = all_vault_keys.clone();
+                        all_keys.extend(all_host_keys);
+                        reencrypt_secrets_for_new_key(&db, &vault_key, &all_vault_keys, &all_keys)
+                            .await?;
+                    } else {
+                        info!("Skipping re-encryption due to --no-reencrypt flag");
+                    }
+
                     // Log audit entry
                     db.log_audit(
                         "ADD_VAULT_KEY",
@@ -167,7 +374,11 @@ async fn main() -> Result<()> {
                     info!("  Name: {name}");
                     info!("  Fingerprint: {fingerprint}");
                 }
-                KeyCommands::AddHost { hostname, key_path } => {
+                KeyCommands::AddHost {
+                    hostname,
+                    key_path,
+                    no_reencrypt,
+                } => {
                     // Check if hostname already exists
                     if db
                         .get_host_key_by_hostname(&hostname)
@@ -211,6 +422,18 @@ async fn main() -> Result<()> {
 
                     // Store in database
                     db.insert_key(&host_key).await.into_diagnostic()?;
+
+                    // Re-encrypt existing secrets for the new host key (unless disabled)
+                    if !no_reencrypt {
+                        let all_vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+                        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+                        let mut all_keys = all_vault_keys.clone();
+                        all_keys.extend(all_host_keys);
+                        reencrypt_secrets_for_new_key(&db, &host_key, &all_vault_keys, &all_keys)
+                            .await?;
+                    } else {
+                        info!("Skipping re-encryption due to --no-reencrypt flag");
+                    }
 
                     // Log audit entry
                     db.log_audit(
