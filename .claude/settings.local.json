@@ -5,7 +5,8 @@
       "Bash(devenv build:*)",
       "Bash(chmod:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "mcp__language-server__diagnostics"
     ],
     "deny": []
   }
