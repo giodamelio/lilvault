@@ -1,3 +1,5 @@
+//! LilVault - A secure, encrypted secrets management system for homelabs
+
 pub mod audit;
 pub mod cli;
 pub mod crypto;

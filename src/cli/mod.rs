@@ -148,6 +148,12 @@ pub enum SecretCommands {
         key: Option<String>,
     },
 
+    /// Show information about a secret without exposing its content
+    Info {
+        /// Name of the secret
+        name: String,
+    },
+
     /// Delete a secret (marks as deleted, doesn't remove versions)
     Delete {
         /// Name of the secret to delete

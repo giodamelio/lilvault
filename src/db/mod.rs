@@ -444,4 +444,74 @@ impl Database {
 
         self.insert_audit_entry(&audit_entry).await
     }
+
+    /// Get comprehensive information about a secret without exposing the data
+    pub async fn get_secret_info(&self, secret_name: &str) -> Result<Option<SecretInfo>> {
+        // Get secret metadata
+        let secret = match self.get_secret(secret_name).await? {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        // Get all versions
+        let versions: Vec<(i64,)> = sqlx::query_as(
+            "SELECT DISTINCT version FROM secret_storage WHERE secret_name = ? ORDER BY version DESC"
+        )
+        .bind(secret_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let all_versions: Vec<i64> = versions.into_iter().map(|v| v.0).collect();
+
+        // Get keys for each version
+        let mut version_info = Vec::new();
+        for version in &all_versions {
+            let keys_info: Vec<(String, String, Option<String>)> = sqlx::query_as(
+                r#"
+                SELECT ss.key_fingerprint, ss.key_type,
+                       CASE
+                           WHEN ss.key_type = 'vault' THEN k.name
+                           ELSE k.name
+                       END as key_name
+                FROM secret_storage ss
+                LEFT JOIN keys k ON ss.key_fingerprint = k.fingerprint
+                WHERE ss.secret_name = ? AND ss.version = ?
+                ORDER BY ss.key_type, k.name
+                "#,
+            )
+            .bind(secret_name)
+            .bind(version)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let keys: Vec<SecretKeyInfo> = keys_info
+                .into_iter()
+                .map(|(fingerprint, key_type, name)| {
+                    let display_name =
+                        name.unwrap_or_else(|| format!("Unknown ({})", &fingerprint[..8]));
+                    SecretKeyInfo {
+                        fingerprint,
+                        key_type,
+                        name: display_name,
+                    }
+                })
+                .collect();
+
+            version_info.push(SecretVersionInfo {
+                version: *version,
+                encrypted_for_keys: keys,
+            });
+        }
+
+        Ok(Some(SecretInfo {
+            name: secret.name,
+            description: secret.description,
+            template: secret.template,
+            created_at: secret.created_at,
+            updated_at: secret.updated_at,
+            total_versions: all_versions.len() as i64,
+            latest_version: all_versions.first().copied(),
+            versions: version_info,
+        }))
+    }
 }

@@ -1195,6 +1195,145 @@ async fn main() -> Result<()> {
                         info!("  Description: {desc}");
                     }
                 }
+
+                SecretCommands::Info { name } => match db.get_secret_info(&name).await? {
+                    Some(info) => {
+                        println!("Secret: {}", info.name);
+                        if let Some(desc) = &info.description {
+                            println!("Description: {desc}");
+                        }
+                        if let Some(template) = &info.template {
+                            println!("Template: {template}");
+                        }
+                        println!(
+                            "Created: {}",
+                            info.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+                        );
+                        println!(
+                            "Updated: {}",
+                            info.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+                        );
+                        println!("Total versions: {}", info.total_versions);
+                        if let Some(latest) = info.latest_version {
+                            println!("Latest version: {latest}");
+                        }
+                        println!();
+
+                        if info.versions.is_empty() {
+                            println!("No encrypted versions found");
+                        } else {
+                            println!("Version History:");
+                            println!(
+                                "┌─────────┬───────────┬─────────────────────────────────────────────┐"
+                            );
+                            println!(
+                                "│ Version │ Key Count │ Encrypted For                               │"
+                            );
+                            println!(
+                                "├─────────┼───────────┼─────────────────────────────────────────────┤"
+                            );
+
+                            for version_info in &info.versions {
+                                let mut vault_keys = Vec::new();
+                                let mut host_keys = Vec::new();
+
+                                for key in &version_info.encrypted_for_keys {
+                                    if key.key_type == "vault" {
+                                        vault_keys.push(format!("vault:{}", key.name));
+                                    } else {
+                                        host_keys.push(format!("host:{}", key.name));
+                                    }
+                                }
+
+                                let mut all_keys = vault_keys;
+                                all_keys.extend(host_keys);
+                                let keys_text = if all_keys.is_empty() {
+                                    "No keys".to_string()
+                                } else {
+                                    all_keys.join(", ")
+                                };
+
+                                // Truncate long key lists to fit in table
+                                let display_keys = if keys_text.len() > 40 {
+                                    format!("{}...", &keys_text[..37])
+                                } else {
+                                    keys_text
+                                };
+
+                                println!(
+                                    "│ {:>7} │ {:>9} │ {:<43} │",
+                                    version_info.version,
+                                    version_info.encrypted_for_keys.len(),
+                                    display_keys
+                                );
+                            }
+                            println!(
+                                "└─────────┴───────────┴─────────────────────────────────────────────┘"
+                            );
+
+                            // Show full key details if any were truncated
+                            let has_long_keys = info.versions.iter().any(|v| {
+                                let mut all_keys = Vec::new();
+                                for key in &v.encrypted_for_keys {
+                                    if key.key_type == "vault" {
+                                        all_keys.push(format!("vault:{}", key.name));
+                                    } else {
+                                        all_keys.push(format!("host:{}", key.name));
+                                    }
+                                }
+                                all_keys.join(", ").len() > 40
+                            });
+
+                            if has_long_keys {
+                                println!("\nDetailed Key Information:");
+                                for version_info in &info.versions {
+                                    let mut vault_keys = Vec::new();
+                                    let mut host_keys = Vec::new();
+
+                                    for key in &version_info.encrypted_for_keys {
+                                        if key.key_type == "vault" {
+                                            vault_keys.push(key.name.as_str());
+                                        } else {
+                                            host_keys.push(key.name.as_str());
+                                        }
+                                    }
+
+                                    let all_keys_len = vault_keys.len() + host_keys.len();
+                                    if all_keys_len > 0 {
+                                        let keys_display = format!(
+                                            "{}{}",
+                                            if !vault_keys.is_empty() {
+                                                format!("vault:[{}]", vault_keys.join(", "))
+                                            } else {
+                                                String::new()
+                                            },
+                                            if !host_keys.is_empty() {
+                                                format!(
+                                                    "{}host:[{}]",
+                                                    if !vault_keys.is_empty() { " " } else { "" },
+                                                    host_keys.join(", ")
+                                                )
+                                            } else {
+                                                String::new()
+                                            }
+                                        );
+
+                                        if keys_display.len() > 40 {
+                                            println!(
+                                                "  Version {}: {}",
+                                                version_info.version, keys_display
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        error!("Secret '{name}' not found");
+                        std::process::exit(1);
+                    }
+                },
             }
         }
 

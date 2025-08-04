@@ -276,3 +276,28 @@ mod tests {
         assert_eq!(deserialized.details, None);
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretKeyInfo {
+    pub fingerprint: String,
+    pub key_type: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretVersionInfo {
+    pub version: i64,
+    pub encrypted_for_keys: Vec<SecretKeyInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretInfo {
+    pub name: String,
+    pub description: Option<String>,
+    pub template: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub total_versions: i64,
+    pub latest_version: Option<i64>,
+    pub versions: Vec<SecretVersionInfo>,
+}
