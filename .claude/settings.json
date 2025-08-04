@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "nix fmt",
+            "command": ".claude/hooks/format.sh",
             "blocking": true
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "nix build .#checks.x86_64-linux.rust-check",
+            "command": ".claude/hooks/rust-check.sh",
             "blocking": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "nix build .#checks.x86_64-linux.rust-test",
+            "command": ".claude/hooks/rust-test.sh",
             "blocking": true
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "nix build .#checks.x86_64-linux.rust-clippy",
+            "command": ".claude/hooks/rust-clippy.sh",
             "blocking": true
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo doc --no-deps",
+            "command": ".claude/hooks/cargo-doc.sh",
             "blocking": true
           }
         ]
@@ -61,12 +61,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo tree --duplicates",
+            "command": ".claude/hooks/cargo-tree.sh",
             "blocking": true
           },
           {
             "type": "command",
-            "command": "cargo doc --no-deps",
+            "command": ".claude/hooks/cargo-doc.sh",
             "blocking": true
           }
         ]
@@ -126,6 +126,8 @@
       "Bash(treefmt*)",
       "Bash(nix fmt*)",
       "Bash(nix build*)",
+      "Bash(.claude/hooks/*.sh)",
+      "Bash(sqlx*)",
       "Bash(DATABASE_URL=\"sqlite:vault.db\" cargo sqlx prepare)",
       "WebFetch(domain:docs.anthropic.com)",
       "mcp__sequential-thinking__sequentialthinking"
