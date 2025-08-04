@@ -193,8 +193,6 @@ in {
   '';
 
   # Export the lilvault package so other flakes can reference it
-  devenv.root = ./.;
-
   outputs = {
     packages = {
       lilvault = lilvault;
