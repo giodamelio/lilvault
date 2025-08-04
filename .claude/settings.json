@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "treefmt",
+            "command": ".claude/treefmt-hook.sh",
             "blocking": true
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo check",
+            "command": "/home/giodamelio/projects/lilvault/.claude/cargo-check-hook.sh",
             "blocking": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo test",
+            "command": ".claude/cargo-test-hook.sh",
             "blocking": true
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo clippy -- -D warnings",
+            "command": ".claude/cargo-clippy-hook.sh",
             "blocking": true
           }
         ]
@@ -105,8 +105,10 @@
       "Bash(git diff*)",
       "Bash(git show*)",
       "Bash(git add *)",
+      "Bash(git commit*)",
+      "Bash(git reset*)",
       "Bash(ls *)",
-      "Bash(mkdir /home/giodamelio/projects/lilvault/*)",
+      "Bash(mkdir *)",
       "Bash(rm /home/giodamelio/projects/lilvault/*)",
       "Bash(mv /home/giodamelio/projects/lilvault/* /home/giodamelio/projects/lilvault/*)",
       "Bash(cp * /home/giodamelio/projects/lilvault/*)",
@@ -114,7 +116,19 @@
       "Bash(echo *)",
       "Bash(cat *)",
       "Bash(which *)",
-      "Bash(type *)"
+      "Bash(type *)",
+      "Bash(find*)",
+      "Bash(notify-send*)",
+      "Bash(treefmt*)",
+      "Bash(DATABASE_URL=\"sqlite:vault.db\" cargo sqlx prepare)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "mcp__sequential-thinking__sequentialthinking"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "language-server",
+    "memory",
+    "sequential-thinking"
+  ]
 }

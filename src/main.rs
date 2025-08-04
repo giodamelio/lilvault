@@ -15,7 +15,7 @@ use lilvault::db::{
 use miette::{IntoDiagnostic, Result};
 use std::fs;
 
-/// Helper function to check if vault is initialized
+/// Helper function to check if the vault database is properly initialized
 async fn ensure_initialized(db: &Database) -> Result<()> {
     if !db.is_initialized().await.into_diagnostic()? {
         eprintln!("Error: Vault not initialized. Run 'lilvault init' first.");
