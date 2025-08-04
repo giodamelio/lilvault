@@ -10,7 +10,7 @@ LilVault is a single-file SQLite-based secrets manager that allows you to safely
 
 - **Single SQLite file**: Portable vault that can be safely distributed to all hosts
 - **Per-host encryption**: Each secret encrypted separately for each target host using their SSH public keys
-- **Master key support**: Multiple password-protected master keys for administrative access
+- **Vault key support**: Multiple password-protected vault keys for administrative access
 - **Infinite versioning**: Never delete secrets, only create new versions
 - **Audit logging**: Simple debugging-focused audit trail for all operations
 - **Safe distribution**: Vault file can be copied to any host - they only see their secrets
@@ -19,15 +19,16 @@ LilVault is a single-file SQLite-based secrets manager that allows you to safely
 
 ### Encryption Strategy
 - **Host encryption**: SSH public keys converted to age recipients
-- **Master keys**: Password-protected age keys for full vault access
-- **Storage**: Multiple encrypted copies per secret (one per target host + master keys)
+- **Vault keys**: Password-protected age keys for full vault access
+- **Storage**: Multiple encrypted copies per secret (one per target host + vault keys)
 
 ### Database Schema
 ```sql
--- Master keys (password-protected age keys)
-CREATE TABLE master_keys (
+-- Vault keys (password-protected age keys)
+CREATE TABLE vault_keys (
     fingerprint TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    public_key TEXT NOT NULL,
     encrypted_private_key BLOB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -95,23 +96,28 @@ CREATE TABLE audit_log (
 ### Basic Operations
 ```bash
 # Initialize vault
-lilvault init --name "primary" --password
+lilvault init --name "primary"
 
-# Key management
-lilvault add-master-key --name "backup" --password
-lilvault add-host <hostname> <ssh-public-key-path>
-lilvault list-hosts
-lilvault list-master-keys
+# Vault key management
+lilvault vault add --name "backup"
+lilvault vault list
+lilvault vault remove <fingerprint>
+
+# Host key management
+lilvault host add <hostname> <ssh-public-key-path>
+lilvault host list
+lilvault host remove <hostname-or-fingerprint>
 
 # Secret operations
-lilvault store <secret-name> [--hosts host1,host2] [--file <path> | --stdin]
-lilvault get <secret-name> [--version <n>] [--key <fingerprint>]
-lilvault list [--key <fingerprint>]
-lilvault versions <secret-name>
+lilvault secret store <secret-name> [--hosts host1,host2] [--file <path> | --stdin] [--description "desc"]
+lilvault secret get <secret-name> [--version <n>] [--key <fingerprint>]
+lilvault secret list [--key <fingerprint>]
+lilvault secret versions <secret-name> [--key <fingerprint>]
+lilvault secret delete <secret-name>
 
 # Audit log
 lilvault audit list [--limit 50]
-lilvault audit show --resource <name>
+lilvault audit show [--resource <name>] [--operation <op>]
 lilvault audit since --days 7
 ```
 
@@ -151,7 +157,7 @@ lilvault audit since --days 7
 ## Security Properties
 
 - **Key isolation**: Each key can only decrypt secrets intended for it
-- **Master key access**: Master keys can decrypt all secrets for administration
+- **Vault key access**: Vault keys can decrypt all secrets for administration
 - **Safe distribution**: Vault file safe to copy anywhere - hosts only see their data
 - **Audit trail**: All mutations logged for debugging and change tracking
 - **Version control**: Different secret versions can have different host access

@@ -7,7 +7,15 @@
       "Bash(notify-send:*)",
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(cargo run:*)",
+      "Bash(DATABASE_URL=\"sqlite:vault.db\" cargo sqlx prepare)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(cargo build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(git reset:*)",
+      "Bash(find:*)",
+      "Bash(cargo test)"
     ]
   },
   "enableAllProjectMcpServers": true,
