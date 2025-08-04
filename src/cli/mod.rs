@@ -29,16 +29,10 @@ pub enum Commands {
         password_file: Option<PathBuf>,
     },
 
-    /// Vault key management
-    Vault {
+    /// Key management (vault and host keys)
+    Keys {
         #[command(subcommand)]
-        command: VaultKeyCommands,
-    },
-
-    /// Host key management
-    Host {
-        #[command(subcommand)]
-        command: HostKeyCommands,
+        command: KeyCommands,
     },
 
     /// Secret management
@@ -55,9 +49,9 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum VaultKeyCommands {
+pub enum KeyCommands {
     /// Add a new vault key
-    Add {
+    AddVault {
         /// Name for the vault key
         #[arg(long)]
         name: String,
@@ -66,32 +60,24 @@ pub enum VaultKeyCommands {
         password_file: Option<PathBuf>,
     },
 
-    /// List all vault keys
-    List,
-
-    /// Remove a vault key
-    Remove {
-        /// Fingerprint of the vault key to remove
-        fingerprint: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum HostKeyCommands {
     /// Add a host key
-    Add {
+    AddHost {
         /// Hostname for the key
         hostname: String,
         /// Path to SSH public key file
         key_path: PathBuf,
     },
 
-    /// List all host keys
-    List,
+    /// List all keys (or filter by type)
+    List {
+        /// Filter by key type (vault or host)
+        #[arg(long)]
+        key_type: Option<String>,
+    },
 
-    /// Remove a host key
+    /// Remove a key
     Remove {
-        /// Hostname or fingerprint to remove
+        /// Key fingerprint or hostname to remove
         identifier: String,
     },
 }
@@ -151,6 +137,24 @@ pub enum SecretCommands {
     Delete {
         /// Name of the secret to delete
         name: String,
+    },
+
+    /// Generate a random secret and store it
+    Generate {
+        /// Name of the secret
+        name: String,
+        /// Length of the generated secret
+        #[arg(long, default_value = "32")]
+        length: usize,
+        /// Format of the generated secret
+        #[arg(long, default_value = "hex", value_parser = ["hex", "base64", "alphanumeric"])]
+        format: String,
+        /// Hosts that should have access (comma-separated)
+        #[arg(long)]
+        hosts: Option<String>,
+        /// Optional description for the secret
+        #[arg(long)]
+        description: Option<String>,
     },
 }
 

@@ -1,9 +1,7 @@
 use age::x25519::Recipient;
 use chrono::Utc;
 use clap::Parser;
-use lilvault::cli::{
-    AuditCommands, Cli, Commands, HostKeyCommands, SecretCommands, VaultKeyCommands,
-};
+use lilvault::cli::{AuditCommands, Cli, Commands, KeyCommands, SecretCommands};
 use lilvault::crypto::{
     decrypt_secret_with_vault_key, encrypt_for_recipients, generate_fingerprint,
     generate_master_key, get_password, parse_ssh_public_key,
@@ -109,16 +107,16 @@ async fn main() -> Result<()> {
             info!("  Database: {}", cli.database.display());
         }
 
-        Commands::Vault { command } => {
+        Commands::Keys { command } => {
             ensure_initialized(&db).await?;
             match command {
-                VaultKeyCommands::Add {
+                KeyCommands::AddVault {
                     name,
                     password_file,
                 } => {
                     // Get password
-                    let password = if let Some(ref path) = password_file {
-                        get_password("", Some(path)).into_diagnostic()?
+                    let password = if let Some(path) = password_file {
+                        get_password("", Some(&path)).into_diagnostic()?
                     } else {
                         let password = get_password("Enter password for new vault key", None)
                             .into_diagnostic()?;
@@ -168,63 +166,7 @@ async fn main() -> Result<()> {
                     info!("  Name: {name}");
                     info!("  Fingerprint: {fingerprint}");
                 }
-                VaultKeyCommands::List => {
-                    let keys = db.get_all_vault_keys().await.into_diagnostic()?;
-
-                    if keys.is_empty() {
-                        info!("No vault keys found.");
-                        return Ok(());
-                    }
-
-                    info!("Vault Keys:");
-                    info!("{:<16} {:<20} Created", "Fingerprint", "Name");
-                    info!("{}", "-".repeat(60));
-
-                    for key in keys {
-                        info!(
-                            "{:<16} {:<20} {}",
-                            key.fingerprint,
-                            key.name,
-                            key.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-                        );
-                    }
-                }
-                VaultKeyCommands::Remove { fingerprint } => {
-                    // Check if this is the last vault key
-                    let keys = db.get_all_vault_keys().await.into_diagnostic()?;
-                    if keys.len() <= 1 {
-                        error!(
-                            "Cannot remove the last vault key. At least one vault key must remain."
-                        );
-                        std::process::exit(1);
-                    }
-
-                    if db.remove_vault_key(&fingerprint).await.into_diagnostic()? {
-                        // Log audit entry
-                        db.log_audit(
-                            "REMOVE_VAULT_KEY",
-                            &fingerprint,
-                            Some("Vault key removed"),
-                            None,
-                            true,
-                            None,
-                        )
-                        .await
-                        .into_diagnostic()?;
-
-                        info!("✓ Vault key removed: {fingerprint}");
-                    } else {
-                        error!("Vault key not found: {fingerprint}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        }
-
-        Commands::Host { command } => {
-            ensure_initialized(&db).await?;
-            match command {
-                HostKeyCommands::Add { hostname, key_path } => {
+                KeyCommands::AddHost { hostname, key_path } => {
                     // Check if hostname already exists
                     if db
                         .get_host_key_by_hostname(&hostname)
@@ -286,47 +228,85 @@ async fn main() -> Result<()> {
                     info!("  Fingerprint: {fingerprint}");
                     info!("  Key file: {}", key_path.display());
                 }
-                HostKeyCommands::List => {
-                    let keys = db.get_all_host_keys().await.into_diagnostic()?;
+                KeyCommands::List { key_type } => {
+                    let keys = if let Some(filter_type) = key_type {
+                        if filter_type == "vault" {
+                            db.get_all_vault_keys().await.into_diagnostic()?
+                        } else if filter_type == "host" {
+                            db.get_all_host_keys().await.into_diagnostic()?
+                        } else {
+                            error!("Invalid key type '{}'. Use 'vault' or 'host'", filter_type);
+                            std::process::exit(1);
+                        }
+                    } else {
+                        // Show all keys
+                        let mut all_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+                        let mut host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+                        all_keys.append(&mut host_keys);
+                        all_keys.sort_by(|a, b| a.name.cmp(&b.name));
+                        all_keys
+                    };
 
                     if keys.is_empty() {
-                        info!("No host keys found.");
+                        info!("No keys found.");
                         return Ok(());
                     }
 
-                    info!("Host Keys:");
-                    info!("{:<16} {:<20} Added", "Fingerprint", "Hostname");
-                    info!("{}", "-".repeat(60));
+                    info!("Keys:");
+                    info!("{:<16} {:<20} {:<8} Created", "Fingerprint", "Name", "Type");
+                    info!("{}", "-".repeat(70));
 
                     for key in keys {
                         info!(
-                            "{:<16} {:<20} {}",
+                            "{:<16} {:<20} {:<8} {}",
                             key.fingerprint,
                             key.name,
+                            key.key_type,
                             key.created_at.format("%Y-%m-%d %H:%M:%S UTC")
                         );
                     }
                 }
-                HostKeyCommands::Remove { identifier } => {
-                    // Try to remove by hostname first, then by fingerprint
-                    let removed = if db
-                        .remove_host_key_by_hostname(&identifier)
-                        .await
-                        .into_diagnostic()?
-                    {
-                        true
-                    } else {
-                        db.remove_host_key_by_fingerprint(&identifier)
+                KeyCommands::Remove { identifier } => {
+                    // Check if this is a vault key and if it's the last one
+                    if let Some(key) = db.get_key(&identifier).await.into_diagnostic()? {
+                        if key.key_type == "vault" {
+                            let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+                            if vault_keys.len() <= 1 {
+                                error!(
+                                    "Cannot remove the last vault key. At least one vault key must remain."
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+
+                    // Try to remove as vault key first, then host key
+                    let removed_vault = db.remove_vault_key(&identifier).await.into_diagnostic()?;
+                    let removed_host = if !removed_vault {
+                        db.remove_host_key_by_hostname(&identifier)
                             .await
                             .into_diagnostic()?
+                            || db
+                                .remove_host_key_by_fingerprint(&identifier)
+                                .await
+                                .into_diagnostic()?
+                    } else {
+                        false
                     };
 
-                    if removed {
+                    if removed_vault || removed_host {
+                        let key_type = if removed_vault { "vault" } else { "host" };
+                        let operation = if removed_vault {
+                            "REMOVE_VAULT_KEY"
+                        } else {
+                            "REMOVE_HOST_KEY"
+                        };
+
                         // Log audit entry
                         db.log_audit(
-                            "REMOVE_HOST_KEY",
+                            operation,
                             &identifier,
-                            Some("Host key removed"),
+                            Some(&format!("{key_type} key removed")),
                             None,
                             true,
                             None,
@@ -334,9 +314,9 @@ async fn main() -> Result<()> {
                         .await
                         .into_diagnostic()?;
 
-                        info!("✓ Host key removed: {identifier}");
+                        info!("✓ {} key removed: {}", key_type, identifier);
                     } else {
-                        error!("Host key not found: {identifier}");
+                        error!("Key not found: {}", identifier);
                         std::process::exit(1);
                     }
                 }
@@ -798,6 +778,170 @@ async fn main() -> Result<()> {
                         None => {
                             info!("Secret '{name}' has no stored versions");
                         }
+                    }
+                }
+                SecretCommands::Generate {
+                    name,
+                    length,
+                    format,
+                    hosts,
+                    description,
+                } => {
+                    use rand::RngCore;
+
+                    // Generate random bytes using a cryptographically secure RNG
+                    let mut rng = rand::thread_rng();
+                    let mut random_bytes = vec![0u8; length];
+                    rng.fill_bytes(&mut random_bytes);
+
+                    // Format the random data according to the specified format
+                    let secret_data = match format.as_str() {
+                        "hex" => hex::encode(&random_bytes).into_bytes(),
+                        "base64" => {
+                            use base64::Engine;
+                            base64::engine::general_purpose::STANDARD
+                                .encode(&random_bytes)
+                                .into_bytes()
+                        }
+                        "alphanumeric" => {
+                            use rand::seq::SliceRandom;
+                            const CHARS: &[u8] =
+                                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+                            (0..length)
+                                .map(|_| *CHARS.choose(&mut rng).unwrap())
+                                .collect::<Vec<u8>>()
+                        }
+                        _ => {
+                            error!(
+                                "Invalid format '{}'. Use 'hex', 'base64', or 'alphanumeric'",
+                                format
+                            );
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get all vault keys and specified host keys (reuse logic from Store command)
+                    let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+                    let mut target_keys = Vec::new();
+
+                    // Add all vault keys as recipients
+                    for vault_key in &vault_keys {
+                        let recipient: Recipient = vault_key.public_key.parse().map_err(|e| {
+                            miette::miette!(
+                                "Failed to parse vault key public key {}: {:?}",
+                                vault_key.fingerprint,
+                                e
+                            )
+                        })?;
+                        target_keys.push((
+                            vault_key.fingerprint.clone(),
+                            "vault".to_string(),
+                            Box::new(recipient) as Box<dyn age::Recipient + Send>,
+                        ));
+                    }
+
+                    // Add specified host keys
+                    if let Some(host_list) = hosts {
+                        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
+                        for hostname in hostnames {
+                            if let Some(host_key) = db
+                                .get_host_key_by_hostname(hostname)
+                                .await
+                                .into_diagnostic()?
+                            {
+                                let ssh_recipient =
+                                    parse_ssh_public_key(&host_key.public_key).into_diagnostic()?;
+                                target_keys.push((
+                                    host_key.fingerprint.clone(),
+                                    "host".to_string(),
+                                    Box::new(ssh_recipient) as Box<dyn age::Recipient + Send>,
+                                ));
+                            } else {
+                                warn!("Host '{hostname}' not found, skipping");
+                            }
+                        }
+                    } else {
+                        // If no hosts specified, add all host keys
+                        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+                        for host_key in all_host_keys {
+                            let ssh_recipient =
+                                parse_ssh_public_key(&host_key.public_key).into_diagnostic()?;
+                            target_keys.push((
+                                host_key.fingerprint.clone(),
+                                "host".to_string(),
+                                Box::new(ssh_recipient) as Box<dyn age::Recipient + Send>,
+                            ));
+                        }
+                    }
+
+                    if target_keys.is_empty() {
+                        error!("No keys available for encryption");
+                        std::process::exit(1);
+                    }
+
+                    // Create or update secret metadata
+                    let secret_exists = db.get_secret(&name).await.into_diagnostic()?.is_some();
+                    if !secret_exists {
+                        let now = Utc::now();
+                        let secret = Secret {
+                            name: name.clone(),
+                            description: description.clone(),
+                            template: None,
+                            created_at: now,
+                            updated_at: now,
+                        };
+                        db.insert_secret(&secret).await.into_diagnostic()?;
+                    }
+
+                    // Get next version number
+                    let version = db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+                    let mut stored_count = 0;
+
+                    // Store encrypted data for each target key (per-key encryption)
+                    for (key_fingerprint, key_type, recipient) in target_keys {
+                        // Encrypt secret data for this specific key
+                        let encrypted_data = encrypt_for_recipients(&secret_data, vec![recipient])
+                            .into_diagnostic()?;
+
+                        let now = Utc::now();
+                        let storage_entry = SecretStorage {
+                            id: 0, // Will be set by database
+                            secret_name: name.clone(),
+                            version,
+                            key_fingerprint: key_fingerprint.clone(),
+                            key_type: key_type.clone(),
+                            encrypted_data,
+                            created_at: now,
+                            updated_at: now,
+                        };
+
+                        db.insert_secret_storage(&storage_entry)
+                            .await
+                            .into_diagnostic()?;
+                        stored_count += 1;
+                    }
+
+                    // Log audit entry
+                    db.log_audit(
+                        "GENERATE_SECRET",
+                        &name,
+                        Some(&format!("Generated {format} secret (length: {length}) version {version} for {stored_count} keys")),
+                        Some(version),
+                        true,
+                        None,
+                    )
+                    .await
+                    .into_diagnostic()?;
+
+                    info!("✓ Secret generated and stored successfully!");
+                    info!("  Name: {name}");
+                    info!("  Format: {format}");
+                    info!("  Length: {length}");
+                    info!("  Version: {version}");
+                    info!("  Encrypted for {stored_count} keys");
+                    if let Some(desc) = description {
+                        info!("  Description: {desc}");
                     }
                 }
             }
