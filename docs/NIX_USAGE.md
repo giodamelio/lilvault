@@ -1,6 +1,6 @@
 # Using LilVault in Other Nix Flakes
 
-This project exports the `lilvault` package as a devenv output, making it available for installation in other Nix flakes.
+This project exports the `lilvault` package as a flake output, making it available for installation in other Nix flakes.
 
 ## Using in a Nix Flake
 
@@ -23,7 +23,7 @@ Add this project as an input to your `flake.nix`:
       modules = [
         {
           environment.systemPackages = [
-            lilvault.outputs.packages.x86_64-linux.lilvault
+            lilvault.packages.x86_64-linux.default
           ];
         }
       ];
@@ -32,7 +32,7 @@ Add this project as an input to your `flake.nix`:
     # Or use in a dev shell
     devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell {
       buildInputs = [
-        lilvault.outputs.packages.x86_64-linux.lilvault
+        lilvault.packages.x86_64-linux.default
       ];
     };
   };
@@ -58,7 +58,7 @@ Add this project as an input to your `flake.nix`:
       modules = [
         {
           home.packages = [
-            lilvault.outputs.packages.x86_64-linux.lilvault
+            lilvault.packages.x86_64-linux.default
           ];
         }
       ];
@@ -91,8 +91,9 @@ The Nix package automatically:
 
 ## Available Outputs
 
-- `packages.${system}.lilvault` - The main lilvault binary
-- `packages.${system}.default` - Alias to lilvault package
+- `packages.${system}.default` - The main lilvault binary
+- `packages.${system}.lilvault` - Alias to the main binary
+- `packages.${system}.dump-schema` - Development utility for generating schema.sql
 
 ## Example Commands After Installation
 

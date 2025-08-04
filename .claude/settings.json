@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/treefmt-hook.sh",
+            "command": "nix fmt",
             "blocking": true
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/giodamelio/projects/lilvault/.claude/cargo-check-hook.sh",
+            "command": "nix build .#checks.x86_64-linux.rust-check",
             "blocking": true
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/cargo-test-hook.sh",
+            "command": "nix build .#checks.x86_64-linux.rust-test",
             "blocking": true
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/cargo-clippy-hook.sh",
+            "command": "nix build .#checks.x86_64-linux.rust-clippy",
             "blocking": true
           }
         ]
@@ -124,6 +124,8 @@
       "Bash(find*)",
       "Bash(notify-send*)",
       "Bash(treefmt*)",
+      "Bash(nix fmt*)",
+      "Bash(nix build*)",
       "Bash(DATABASE_URL=\"sqlite:vault.db\" cargo sqlx prepare)",
       "WebFetch(domain:docs.anthropic.com)",
       "mcp__sequential-thinking__sequentialthinking"
