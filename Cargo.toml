@@ -1,6 +1,46 @@
 [package]
 name = "lilvault"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "A secure, encrypted secrets management system for homelabs"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/lilvault"
 
 [dependencies]
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate", "macros"] }
+
+# Encryption (with SSH support)
+age = { version = "0.10", features = ["ssh", "armor"] }
+
+# CLI & User Interface
+clap = { version = "4.5", features = ["derive", "env"] }
+dialoguer = { version = "0.11", features = ["password"] }
+
+# Error Handling
+miette = { version = "7.2", features = ["fancy"] }
+thiserror = "1.0"
+
+# Templating (for future features)
+tera = "1.20"
+
+# Async Runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+env_logger = "0.11"
+sha2 = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3.0"
+tokio-test = "0.4"
+assert_cmd = "2.0"
+assert_fs = "1.1"
+predicates = "3.1"

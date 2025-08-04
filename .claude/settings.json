@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "treefmt"
+            "command": "treefmt",
+            "blocking": true
           }
         ]
       },
@@ -16,7 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo check"
+            "command": "cargo check",
+            "blocking": true
           }
         ]
       },
@@ -26,7 +28,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo test"
+            "command": "cargo test",
+            "blocking": true
           }
         ]
       },
@@ -36,7 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo clippy -- -D warnings"
+            "command": "cargo clippy -- -D warnings",
+            "blocking": true
           }
         ]
       },
@@ -46,7 +50,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo doc --no-deps"
+            "command": "cargo doc --no-deps",
+            "blocking": true
           }
         ]
       },
@@ -56,11 +61,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cargo tree --duplicates"
+            "command": "cargo tree --duplicates",
+            "blocking": true
           },
           {
             "type": "command",
-            "command": "cargo doc --no-deps"
+            "command": "cargo doc --no-deps",
+            "blocking": true
           }
         ]
       }
@@ -71,10 +78,43 @@
         "hooks": [
           {
             "type": "command",
-            "command": ".claude/notification-hook.sh"
+            "command": ".claude/notification-hook.sh",
+            "blocking": true
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Read(/home/giodamelio/projects/lilvault/*)",
+      "Write(/home/giodamelio/projects/lilvault/*)",
+      "Edit(/home/giodamelio/projects/lilvault/*)",
+      "MultiEdit(/home/giodamelio/projects/lilvault/*)",
+      "mcp__language-server__*(/home/giodamelio/projects/lilvault/*)",
+      "Bash(cargo build*)",
+      "Bash(cargo check*)",
+      "Bash(cargo test*)",
+      "Bash(cargo clippy*)",
+      "Bash(cargo doc*)",
+      "Bash(cargo run*)",
+      "Bash(cargo tree*)",
+      "Bash(cargo fmt*)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git add *)",
+      "Bash(ls *)",
+      "Bash(mkdir /home/giodamelio/projects/lilvault/*)",
+      "Bash(rm /home/giodamelio/projects/lilvault/*)",
+      "Bash(mv /home/giodamelio/projects/lilvault/* /home/giodamelio/projects/lilvault/*)",
+      "Bash(cp * /home/giodamelio/projects/lilvault/*)",
+      "Bash(chmod * /home/giodamelio/projects/lilvault/*)",
+      "Bash(echo *)",
+      "Bash(cat *)",
+      "Bash(which *)",
+      "Bash(type *)"
     ]
   }
 }
