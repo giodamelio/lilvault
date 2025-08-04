@@ -4,7 +4,7 @@ use clap::Parser;
 use dialoguer::Select;
 use lilvault::cli::{AuditCommands, Cli, Commands, KeyCommands, SecretCommands};
 use lilvault::crypto::{
-    decrypt_master_key, decrypt_secret_with_vault_key, decrypt_with_identity,
+    decrypt_master_key, decrypt_secret_with_vault_key, decrypt_with_identity, edit_with_editor,
     encrypt_for_recipients, generate_fingerprint, generate_master_key, get_password,
     host_key_to_recipient, parse_ssh_public_key, vault_key_to_recipient,
 };
@@ -1583,6 +1583,191 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                 },
+
+                SecretCommands::Edit {
+                    name,
+                    key,
+                    password_file,
+                } => {
+                    // Check if secret exists
+                    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
+                        error!("Secret '{name}' not found");
+                        std::process::exit(1);
+                    }
+
+                    // Use the same logic as the Get command but launch editor afterwards
+                    let vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
+                    if vault_keys.is_empty() {
+                        error!("No vault keys available for decryption");
+                        std::process::exit(1);
+                    }
+
+                    let selected_key = if let Some(key_fingerprint) = key {
+                        // Use specific key
+                        vault_keys
+                            .iter()
+                            .find(|k| k.fingerprint == key_fingerprint)
+                            .cloned()
+                    } else if vault_keys.len() == 1 {
+                        // Use the only available key
+                        Some(vault_keys[0].clone())
+                    } else {
+                        // Multiple vault keys, let user choose
+                        let items: Vec<String> = vault_keys
+                            .iter()
+                            .map(|k| format!("{} ({})", k.name, &k.fingerprint[..8]))
+                            .collect();
+
+                        let selection = Select::new()
+                            .with_prompt("Select vault key to decrypt with")
+                            .items(&items)
+                            .interact()
+                            .into_diagnostic()?;
+
+                        Some(vault_keys[selection].clone())
+                    };
+
+                    let key = match selected_key {
+                        Some(key) => key,
+                        None => {
+                            error!("Specified key not found");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get password
+                    let password = get_password(
+                        &format!("Enter password for vault key '{}'", key.name),
+                        password_file.as_deref(),
+                    )?;
+
+                    // Get the latest version of the secret
+                    let latest_version = db
+                        .get_latest_secret_version(&name)
+                        .await
+                        .into_diagnostic()?;
+                    let latest_version = match latest_version {
+                        Some(version) => version,
+                        None => {
+                            error!("No versions found for secret '{name}'");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get encrypted data for this key
+                    let storage = db
+                        .get_secret_storage_for_key(&name, latest_version, &key.fingerprint)
+                        .await
+                        .into_diagnostic()?;
+
+                    let encrypted_data = match storage {
+                        Some(s) => s.encrypted_data,
+                        None => {
+                            error!("Secret '{name}' not accessible with this key");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Decrypt the secret
+                    let decrypted_data = decrypt_secret_with_vault_key(
+                        &encrypted_data,
+                        key.encrypted_private_key.as_ref().unwrap(),
+                        &password,
+                    )?;
+
+                    // Convert to string for editing
+                    let current_text = String::from_utf8(decrypted_data).map_err(|_| {
+                        miette::miette!(
+                            "Secret contains non-UTF8 data and cannot be edited as text"
+                        )
+                    })?;
+
+                    // Launch editor
+                    match edit_with_editor(&current_text)? {
+                        Some(new_content) => {
+                            // Content changed, store new version
+                            info!("Secret content changed, creating new version");
+
+                            // Get all keys for re-encryption
+                            let vault_keys =
+                                db.get_keys_by_type("vault").await.into_diagnostic()?;
+                            let host_keys = db.get_keys_by_type("host").await.into_diagnostic()?;
+
+                            // Create recipients from all keys
+                            let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+
+                            for key in &vault_keys {
+                                recipients.push(vault_key_to_recipient(&key.public_key)?);
+                            }
+
+                            for key in &host_keys {
+                                recipients.push(host_key_to_recipient(&key.public_key)?);
+                            }
+
+                            if recipients.is_empty() {
+                                error!("No keys available for encryption");
+                                std::process::exit(1);
+                            }
+
+                            // Encrypt the new content
+                            let encrypted_data =
+                                encrypt_for_recipients(new_content.as_bytes(), recipients)?;
+
+                            // Get next version number
+                            let next_version =
+                                db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+                            // Store encrypted data for each key
+                            for key in &vault_keys {
+                                let storage = SecretStorage {
+                                    id: 0, // Will be set by database
+                                    secret_name: name.clone(),
+                                    version: next_version,
+                                    key_fingerprint: key.fingerprint.clone(),
+                                    key_type: "vault".to_string(),
+                                    encrypted_data: encrypted_data.clone(),
+                                    created_at: Utc::now(),
+                                    updated_at: Utc::now(),
+                                };
+                                db.insert_secret_storage(&storage).await.into_diagnostic()?;
+                            }
+
+                            for key in &host_keys {
+                                let storage = SecretStorage {
+                                    id: 0, // Will be set by database
+                                    secret_name: name.clone(),
+                                    version: next_version,
+                                    key_fingerprint: key.fingerprint.clone(),
+                                    key_type: "host".to_string(),
+                                    encrypted_data: encrypted_data.clone(),
+                                    created_at: Utc::now(),
+                                    updated_at: Utc::now(),
+                                };
+                                db.insert_secret_storage(&storage).await.into_diagnostic()?;
+                            }
+
+                            // Log the operation
+                            db.log_audit(
+                                "EDIT_SECRET",
+                                &name,
+                                Some(&format!("Secret '{name}' edited via $EDITOR")),
+                                Some(next_version),
+                                true,
+                                None,
+                            )
+                            .await
+                            .into_diagnostic()?;
+
+                            info!(
+                                "Secret '{}' successfully updated with new version {}",
+                                name, next_version
+                            );
+                        }
+                        None => {
+                            info!("No changes made to secret '{}'", name);
+                        }
+                    }
+                }
             }
         }
 

@@ -186,6 +186,18 @@ pub enum SecretCommands {
         #[arg(long)]
         description: Option<String>,
     },
+
+    /// Edit a secret using $EDITOR
+    Edit {
+        /// Name of the secret to edit
+        name: String,
+        /// Key fingerprint to use for decryption
+        #[arg(long)]
+        key: Option<String>,
+        /// Path to file containing the password (for non-interactive use)
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

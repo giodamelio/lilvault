@@ -39,6 +39,7 @@ sha2 = "0.10"
 rand = "0.8"
 hex = "0.4"
 base64 = "0.22"
+tempfile = "3.0"
 
 # Logging
 log = "0.4"
