@@ -68,6 +68,21 @@ pub enum KeyCommands {
         key_path: PathBuf,
     },
 
+    /// Scan and import host keys like ssh-keyscan
+    ScanHost {
+        /// Hostname or IP address to scan
+        hostname: String,
+        /// Port to scan (default: 22)
+        #[arg(short, long, default_value = "22")]
+        port: u16,
+        /// Key types to scan for (comma-separated: rsa, ecdsa, ed25519)
+        #[arg(short, long, default_value = "rsa,ecdsa,ed25519")]
+        key_types: String,
+        /// Timeout in seconds for connection
+        #[arg(short, long, default_value = "5")]
+        timeout: u64,
+    },
+
     /// List all keys (or filter by type)
     List {
         /// Filter by key type (vault or host)

@@ -229,6 +229,167 @@ async fn main() -> Result<()> {
                     info!("  Fingerprint: {fingerprint}");
                     info!("  Key file: {}", key_path.display());
                 }
+                KeyCommands::ScanHost {
+                    hostname,
+                    port,
+                    key_types,
+                    timeout: _,
+                } => {
+                    use std::process::Command;
+
+                    info!(
+                        "Scanning host {} on port {} for SSH keys...",
+                        hostname, port
+                    );
+
+                    // Parse key types
+                    let types: Vec<&str> = key_types.split(',').map(|s| s.trim()).collect();
+                    let mut collected_keys = Vec::new();
+
+                    for key_type in types {
+                        let key_type = match key_type.to_lowercase().as_str() {
+                            "rsa" => "rsa",
+                            "ecdsa" => "ecdsa",
+                            "ed25519" => "ed25519",
+                            _ => {
+                                warn!("Unsupported key type '{}', skipping", key_type);
+                                continue;
+                            }
+                        };
+
+                        info!("  Scanning for {} keys...", key_type);
+
+                        // Use ssh-keyscan to get the key
+                        let output = Command::new("ssh-keyscan")
+                            .arg("-p")
+                            .arg(port.to_string())
+                            .arg("-t")
+                            .arg(key_type)
+                            .arg(&hostname)
+                            .output();
+
+                        match output {
+                            Ok(result) => {
+                                if result.status.success() {
+                                    let stdout = String::from_utf8_lossy(&result.stdout);
+                                    for line in stdout.lines() {
+                                        if !line.is_empty() && !line.starts_with('#') {
+                                            // Parse the ssh-keyscan output format: "hostname keytype key"
+                                            let parts: Vec<&str> =
+                                                line.split_whitespace().collect();
+                                            if parts.len() >= 3 {
+                                                let public_key =
+                                                    format!("{} {}", parts[1], parts[2]);
+                                                collected_keys
+                                                    .push((key_type.to_string(), public_key));
+                                                info!("    Found {} key", key_type);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    let stderr = String::from_utf8_lossy(&result.stderr);
+                                    warn!(
+                                        "    Failed to scan for {} keys: {}",
+                                        key_type,
+                                        stderr.trim()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to run ssh-keyscan: {}. Make sure ssh-keyscan is installed.",
+                                    e
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+
+                    if collected_keys.is_empty() {
+                        error!("No SSH keys found for host {}", hostname);
+                        std::process::exit(1);
+                    }
+
+                    info!(
+                        "Found {} SSH keys for host {}",
+                        collected_keys.len(),
+                        hostname
+                    );
+
+                    // Check if hostname already exists
+                    if db
+                        .get_host_key_by_hostname(&hostname)
+                        .await
+                        .into_diagnostic()?
+                        .is_some()
+                    {
+                        error!("Host '{}' already exists", hostname);
+                        std::process::exit(1);
+                    }
+
+                    // If multiple keys found, let user choose (or take the first one)
+                    let (selected_key_type, selected_public_key) = if collected_keys.len() == 1 {
+                        collected_keys.into_iter().next().unwrap()
+                    } else {
+                        info!(
+                            "Multiple keys found. Selecting keys in preference order: ed25519, ecdsa, rsa"
+                        );
+
+                        // Prefer ed25519, then ecdsa, then rsa
+                        let preference_order = ["ed25519", "ecdsa", "rsa"];
+                        let mut selected = None;
+
+                        for preferred in &preference_order {
+                            if let Some(key) = collected_keys.iter().find(|(t, _)| t == preferred) {
+                                selected = Some(key.clone());
+                                break;
+                            }
+                        }
+
+                        selected.unwrap_or_else(|| collected_keys.into_iter().next().unwrap())
+                    };
+
+                    info!("Selected {} key for import", selected_key_type);
+
+                    // Parse and validate SSH public key
+                    let _ssh_recipient =
+                        parse_ssh_public_key(&selected_public_key).into_diagnostic()?;
+                    let fingerprint = generate_fingerprint(&selected_public_key);
+
+                    // Create host key record
+                    let now = Utc::now();
+                    let host_key = Key {
+                        fingerprint: fingerprint.clone(),
+                        key_type: "host".to_string(),
+                        name: hostname.clone(),
+                        public_key: selected_public_key,
+                        encrypted_private_key: None,
+                        created_at: now,
+                        updated_at: now,
+                    };
+
+                    // Store in database
+                    db.insert_key(&host_key).await.into_diagnostic()?;
+
+                    // Log audit entry
+                    db.log_audit(
+                        "SCAN_HOST_KEY",
+                        &hostname,
+                        Some(&format!(
+                            "Scanned and added {selected_key_type} key with fingerprint {fingerprint}"
+                        )),
+                        None,
+                        true,
+                        None,
+                    )
+                    .await
+                    .into_diagnostic()?;
+
+                    info!("✓ Host key imported successfully!");
+                    info!("  Hostname: {}", hostname);
+                    info!("  Key type: {}", selected_key_type);
+                    info!("  Fingerprint: {}", fingerprint);
+                }
                 KeyCommands::List { key_type } => {
                     let keys = if let Some(filter_type) = key_type {
                         if filter_type == "vault" {
