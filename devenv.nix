@@ -30,6 +30,54 @@
       };
     };
   };
+
+  # Prepare SQLx database for compile-time verification
+  sqlx-db =
+    pkgs.runCommand "sqlx-db-prepare" {
+      nativeBuildInputs = with pkgs; [sqlx-cli sqlite];
+    } ''
+      mkdir -p $out
+      export DATABASE_URL=sqlite:$out/db.sqlite3
+
+      # Create database and run migrations
+      sqlx database create
+      sqlx migrate --source ${./migrations} run
+    '';
+
+  # Define the lilvault package
+  lilvault = pkgs.rustPlatform.buildRustPackage {
+    pname = "lilvault";
+    version = "0.1.0";
+
+    src = lib.cleanSource ./.;
+
+    cargoLock = {
+      lockFile = ./Cargo.lock;
+    };
+
+    nativeBuildInputs = with pkgs; [
+      pkg-config
+      sqlx-cli
+    ];
+
+    buildInputs = with pkgs; [
+      sqlite
+      openssl
+    ];
+
+    # Set up database for SQLx compile-time verification
+    preBuild = ''
+      export DATABASE_URL=sqlite:${sqlx-db}/db.sqlite3
+    '';
+
+    meta = with lib; {
+      description = "A secure, encrypted secrets management system for homelabs";
+      homepage = "https://github.com/yourusername/lilvault";
+      license = with licenses; [mit asl20];
+      maintainers = [];
+      mainProgram = "lilvault";
+    };
+  };
 in {
   languages.rust = {
     enable = true;
@@ -44,6 +92,7 @@ in {
     pkgs.treefmt
     pkgs.nil
     pkgs.sqlite
+    pkgs.sqlx-cli
     inputs.my-configs.packages.${pkgs.system}.mcp-language-server
   ];
 
@@ -139,4 +188,12 @@ in {
       dump-schema
     fi
   '';
+
+  # Export the lilvault package so other flakes can reference it
+  outputs = {
+    packages = {
+      lilvault = lilvault;
+      default = lilvault;
+    };
+  };
 }
