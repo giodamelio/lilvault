@@ -1,6 +1,7 @@
 use age::x25519::Recipient;
 use chrono::Utc;
 use clap::Parser;
+use dialoguer::Select;
 use lilvault::cli::{AuditCommands, Cli, Commands, KeyCommands, SecretCommands};
 use lilvault::crypto::{
     decrypt_secret_with_vault_key, encrypt_for_recipients, generate_fingerprint,
@@ -588,13 +589,102 @@ async fn main() -> Result<()> {
                             std::process::exit(1);
                         }
 
-                        info!(
-                            "Secret '{name}' version {target_version} is encrypted for the following keys:"
-                        );
-                        for entry in entries {
-                            info!("  {} ({})", entry.key_fingerprint, entry.key_type);
+                        // Check if we're in a terminal and can do interactive selection
+                        if atty::is(atty::Stream::Stdout) && atty::is(atty::Stream::Stdin) {
+                            // Create selection options
+                            let mut options = Vec::new();
+                            let mut vault_entries = Vec::new();
+
+                            for entry in &entries {
+                                if entry.key_type == "vault" {
+                                    // Get the vault key name for better display
+                                    if let Ok(Some(vault_key)) =
+                                        db.get_vault_key(&entry.key_fingerprint).await
+                                    {
+                                        options.push(format!(
+                                            "{} ({}) - vault key",
+                                            vault_key.name,
+                                            &entry.key_fingerprint[..8]
+                                        ));
+                                        vault_entries.push(entry);
+                                    }
+                                }
+                            }
+
+                            if vault_entries.is_empty() {
+                                info!(
+                                    "Secret '{name}' version {target_version} is encrypted for the following keys:"
+                                );
+                                for entry in entries {
+                                    info!("  {} ({})", entry.key_fingerprint, entry.key_type);
+                                }
+                                info!("\nNo vault keys available for interactive decryption.");
+                                info!(
+                                    "Host keys require SSH private keys and are not supported for interactive CLI use."
+                                );
+                                info!("Use --key <fingerprint> with a vault key for decryption.");
+                                return Ok(());
+                            }
+
+                            // Show interactive selection
+                            let selection = Select::new()
+                                .with_prompt(format!("Select a key to decrypt secret '{name}' version {target_version}"))
+                                .items(&options)
+                                .default(0)
+                                .interact()
+                                .map_err(|e| miette::miette!("Selection failed: {}", e))?;
+
+                            let selected_entry = vault_entries[selection];
+                            let key_fingerprint = &selected_entry.key_fingerprint;
+
+                            // Get vault key and prompt for password
+                            let vault_key = db
+                                .get_vault_key(key_fingerprint)
+                                .await
+                                .into_diagnostic()?
+                                .ok_or_else(|| {
+                                    miette::miette!("Vault key not found: {}", key_fingerprint)
+                                })?;
+
+                            let password = get_password(
+                                &format!("Enter password for vault key '{}'", vault_key.name),
+                                password_file.as_deref(),
+                            )
+                            .into_diagnostic()?;
+
+                            let decrypted_data = decrypt_secret_with_vault_key(
+                                &selected_entry.encrypted_data,
+                                vault_key.encrypted_private_key(),
+                                &password,
+                            )
+                            .into_diagnostic()?;
+
+                            // Log audit entry for secret access
+                            db.log_audit(
+                                "GET_SECRET",
+                                &name,
+                                Some(&format!("Retrieved secret version {target_version} with key {key_fingerprint} (interactive)")),
+                                Some(target_version),
+                                true,
+                                None,
+                            )
+                            .await
+                            .into_diagnostic()?;
+
+                            info!("Secret: {name}");
+                            info!("Version: {target_version}");
+                            info!("Key: {} ({})", key_fingerprint, selected_entry.key_type);
+                            info!("Data: {}", String::from_utf8_lossy(&decrypted_data));
+                        } else {
+                            // Not in terminal, show available keys
+                            info!(
+                                "Secret '{name}' version {target_version} is encrypted for the following keys:"
+                            );
+                            for entry in entries {
+                                info!("  {} ({})", entry.key_fingerprint, entry.key_type);
+                            }
+                            info!("\nUse --key <fingerprint> to decrypt with a specific key");
                         }
-                        info!("\nUse --key <fingerprint> to decrypt with a specific key");
                     }
                 }
                 SecretCommands::List { key } => {
