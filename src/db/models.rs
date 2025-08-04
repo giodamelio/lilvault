@@ -288,6 +288,8 @@ pub struct SecretKeyInfo {
 pub struct SecretVersionInfo {
     pub version: i64,
     pub encrypted_for_keys: Vec<SecretKeyInfo>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

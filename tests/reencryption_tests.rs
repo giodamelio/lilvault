@@ -101,7 +101,7 @@ fn test_reencryption_single_vault_key() {
         .args(["secret", "info", "test-secret"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Total versions: 2"));
+        .stdout(predicate::str::contains("Version History (2 versions):"));
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn test_reencryption_multiple_vault_keys_with_password_file() {
         .args(["secret", "info", "test-secret"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Total versions: 2"));
+        .stdout(predicate::str::contains("Version History (2 versions):"));
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn test_no_reencrypt_flag() {
         .args(["secret", "info", "test-secret"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Total versions: 1"));
+        .stdout(predicate::str::contains("Version History (1 versions):"));
 }
 
 #[test]

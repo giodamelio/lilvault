@@ -1,4 +1,5 @@
 use crate::Result;
+use chrono::{DateTime, Utc};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::path::Path;
 
@@ -541,16 +542,18 @@ impl Database {
 
         let all_versions: Vec<i64> = versions.into_iter().map(|v| v.0).collect();
 
-        // Get keys for each version
+        // Get keys for each version with timestamps
         let mut version_info = Vec::new();
         for version in &all_versions {
-            let keys_info: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            type KeysInfoRow = (String, String, Option<String>, DateTime<Utc>, DateTime<Utc>);
+            let keys_info: Vec<KeysInfoRow> = sqlx::query_as(
                 r#"
                 SELECT ss.key_fingerprint, ss.key_type,
                        CASE
                            WHEN ss.key_type = 'vault' THEN k.name
                            ELSE k.name
-                       END as key_name
+                       END as key_name,
+                       ss.created_at, ss.updated_at
                 FROM secret_storage ss
                 LEFT JOIN keys k ON ss.key_fingerprint = k.fingerprint
                 WHERE ss.secret_name = ? AND ss.version = ?
@@ -563,21 +566,36 @@ impl Database {
             .await?;
 
             let keys: Vec<SecretKeyInfo> = keys_info
-                .into_iter()
-                .map(|(fingerprint, key_type, name)| {
-                    let display_name =
-                        name.unwrap_or_else(|| format!("Unknown ({})", &fingerprint[..8]));
+                .iter()
+                .map(|(fingerprint, key_type, name, _, _)| {
+                    let display_name = name
+                        .clone()
+                        .unwrap_or_else(|| format!("Unknown ({})", &fingerprint[..8]));
                     SecretKeyInfo {
-                        fingerprint,
-                        key_type,
+                        fingerprint: fingerprint.clone(),
+                        key_type: key_type.clone(),
                         name: display_name,
                     }
                 })
                 .collect();
 
+            // Get the earliest created_at and latest updated_at for this version
+            let version_created_at = keys_info
+                .iter()
+                .map(|(_, _, _, created, _)| *created)
+                .min()
+                .unwrap_or_else(Utc::now);
+            let version_updated_at = keys_info
+                .iter()
+                .map(|(_, _, _, _, updated)| *updated)
+                .max()
+                .unwrap_or_else(Utc::now);
+
             version_info.push(SecretVersionInfo {
                 version: *version,
                 encrypted_for_keys: keys,
+                created_at: version_created_at,
+                updated_at: version_updated_at,
             });
         }
 

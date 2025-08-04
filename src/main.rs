@@ -1447,6 +1447,7 @@ async fn main() -> Result<()> {
 
                 SecretCommands::Info { name } => match db.get_secret_info(&name).await? {
                     Some(info) => {
+                        // Show basic secret information at top
                         println!("Secret: {}", info.name);
                         if let Some(desc) = &info.description {
                             println!("Description: {desc}");
@@ -1454,6 +1455,12 @@ async fn main() -> Result<()> {
                         if let Some(template) = &info.template {
                             println!("Template: {template}");
                         }
+
+                        // Current version info only
+                        if let Some(latest) = info.latest_version {
+                            println!("Current version: {latest}");
+                        }
+
                         println!(
                             "Created: {}",
                             info.created_at.format("%Y-%m-%d %H:%M:%S UTC")
@@ -1462,24 +1469,21 @@ async fn main() -> Result<()> {
                             "Updated: {}",
                             info.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
                         );
-                        println!("Total versions: {}", info.total_versions);
-                        if let Some(latest) = info.latest_version {
-                            println!("Latest version: {latest}");
-                        }
                         println!();
 
+                        // Version history table with all details
                         if info.versions.is_empty() {
                             println!("No encrypted versions found");
                         } else {
-                            println!("Version History:");
+                            println!("Version History ({} versions):", info.total_versions);
                             println!(
-                                "┌─────────┬───────────┬─────────────────────────────────────────────┐"
+                                "┌─────────┬─────────────────────┬───────────┬─────────────────────────────────────────────┐"
                             );
                             println!(
-                                "│ Version │ Key Count │ Encrypted For                               │"
+                                "│ Version │ Created             │ Key Count │ Encrypted For                               │"
                             );
                             println!(
-                                "├─────────┼───────────┼─────────────────────────────────────────────┤"
+                                "├─────────┼─────────────────────┼───────────┼─────────────────────────────────────────────┤"
                             );
 
                             for version_info in &info.versions {
@@ -1488,18 +1492,24 @@ async fn main() -> Result<()> {
 
                                 for key in &version_info.encrypted_for_keys {
                                     if key.key_type == "vault" {
-                                        vault_keys.push(format!("vault:{}", key.name));
+                                        vault_keys.push(key.name.as_str());
                                     } else {
-                                        host_keys.push(format!("host:{}", key.name));
+                                        host_keys.push(key.name.as_str());
                                     }
                                 }
 
-                                let mut all_keys = vault_keys;
-                                all_keys.extend(host_keys);
-                                let keys_text = if all_keys.is_empty() {
+                                // Build clean key display
+                                let keys_text = if vault_keys.is_empty() && host_keys.is_empty() {
                                     "No keys".to_string()
                                 } else {
-                                    all_keys.join(", ")
+                                    let mut parts = Vec::new();
+                                    if !vault_keys.is_empty() {
+                                        parts.push(format!("vault:[{}]", vault_keys.join(", ")));
+                                    }
+                                    if !host_keys.is_empty() {
+                                        parts.push(format!("host:[{}]", host_keys.join(", ")));
+                                    }
+                                    parts.join(" ")
                                 };
 
                                 // Truncate long key lists to fit in table
@@ -1510,72 +1520,16 @@ async fn main() -> Result<()> {
                                 };
 
                                 println!(
-                                    "│ {:>7} │ {:>9} │ {:<43} │",
+                                    "│ {:>7} │ {:<19} │ {:>9} │ {:<43} │",
                                     version_info.version,
+                                    version_info.created_at.format("%Y-%m-%d %H:%M:%S"),
                                     version_info.encrypted_for_keys.len(),
                                     display_keys
                                 );
                             }
                             println!(
-                                "└─────────┴───────────┴─────────────────────────────────────────────┘"
+                                "└─────────┴─────────────────────┴───────────┴─────────────────────────────────────────────┘"
                             );
-
-                            // Show full key details if any were truncated
-                            let has_long_keys = info.versions.iter().any(|v| {
-                                let mut all_keys = Vec::new();
-                                for key in &v.encrypted_for_keys {
-                                    if key.key_type == "vault" {
-                                        all_keys.push(format!("vault:{}", key.name));
-                                    } else {
-                                        all_keys.push(format!("host:{}", key.name));
-                                    }
-                                }
-                                all_keys.join(", ").len() > 40
-                            });
-
-                            if has_long_keys {
-                                println!("\nDetailed Key Information:");
-                                for version_info in &info.versions {
-                                    let mut vault_keys = Vec::new();
-                                    let mut host_keys = Vec::new();
-
-                                    for key in &version_info.encrypted_for_keys {
-                                        if key.key_type == "vault" {
-                                            vault_keys.push(key.name.as_str());
-                                        } else {
-                                            host_keys.push(key.name.as_str());
-                                        }
-                                    }
-
-                                    let all_keys_len = vault_keys.len() + host_keys.len();
-                                    if all_keys_len > 0 {
-                                        let keys_display = format!(
-                                            "{}{}",
-                                            if !vault_keys.is_empty() {
-                                                format!("vault:[{}]", vault_keys.join(", "))
-                                            } else {
-                                                String::new()
-                                            },
-                                            if !host_keys.is_empty() {
-                                                format!(
-                                                    "{}host:[{}]",
-                                                    if !vault_keys.is_empty() { " " } else { "" },
-                                                    host_keys.join(", ")
-                                                )
-                                            } else {
-                                                String::new()
-                                            }
-                                        );
-
-                                        if keys_display.len() > 40 {
-                                            println!(
-                                                "  Version {}: {}",
-                                                version_info.version, keys_display
-                                            );
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                     None => {
