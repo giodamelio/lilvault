@@ -305,7 +305,7 @@ mod tests {
         // Create a temporary file with a password
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
         let password = "test-password-123";
-        writeln!(temp_file, "{}", password).expect("Failed to write to temp file");
+        writeln!(temp_file, "{password}").expect("Failed to write to temp file");
 
         let result = read_password_from_file(temp_file.path());
         assert!(
@@ -320,7 +320,7 @@ mod tests {
         // Create a temporary file with password and whitespace
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
         let password = "test-password-123";
-        writeln!(temp_file, "  {}  \n", password).expect("Failed to write to temp file");
+        writeln!(temp_file, "  {password}  \n").expect("Failed to write to temp file");
 
         let result = read_password_from_file(temp_file.path());
         assert!(
@@ -355,7 +355,7 @@ mod tests {
         // Create a temporary file with a password
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
         let password = "file-password-456";
-        writeln!(temp_file, "{}", password).expect("Failed to write to temp file");
+        writeln!(temp_file, "{password}").expect("Failed to write to temp file");
 
         let result = get_password("Enter password", Some(temp_file.path()));
         assert!(result.is_ok(), "Should successfully get password from file");

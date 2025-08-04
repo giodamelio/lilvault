@@ -11,7 +11,7 @@ fn create_test_ssh_key(temp_dir: &assert_fs::TempDir) -> assert_fs::fixture::Chi
 
     // Generate SSH key pair using ssh-keygen
     let output = Command::new("ssh-keygen")
-        .args(&[
+        .args([
             "-t",
             "rsa",
             "-b",
@@ -40,7 +40,7 @@ fn create_test_ssh_key(temp_dir: &assert_fs::TempDir) -> assert_fs::fixture::Chi
 /// Helper function to get a lilvault command with a specific database
 fn lilvault_cmd(db_path: &str) -> Command {
     let mut cmd = Command::cargo_bin("lilvault").unwrap();
-    cmd.args(&["--database", db_path]);
+    cmd.args(["--database", db_path]);
     cmd
 }
 
@@ -62,7 +62,7 @@ fn test_init_vault() {
 
     // Test vault initialization
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "test-key",
@@ -87,7 +87,7 @@ fn test_init_vault_already_initialized() {
 
     // Initialize vault first
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "test-key",
@@ -99,7 +99,7 @@ fn test_init_vault_already_initialized() {
 
     // Try to initialize again
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "another-key",
@@ -121,7 +121,7 @@ fn test_vault_key_management() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -133,7 +133,7 @@ fn test_vault_key_management() {
 
     // Add another vault key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "keys",
             "add-vault",
             "--name",
@@ -148,7 +148,7 @@ fn test_vault_key_management() {
 
     // List vault keys
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "vault"])
+        .args(["keys", "list", "--key-type", "vault"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Keys:"))
@@ -166,7 +166,7 @@ fn test_vault_key_remove() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -178,7 +178,7 @@ fn test_vault_key_remove() {
 
     // Add another vault key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "keys",
             "add-vault",
             "--name",
@@ -191,7 +191,7 @@ fn test_vault_key_remove() {
 
     // Get the fingerprint of backup key
     let output = lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "vault"])
+        .args(["keys", "list", "--key-type", "vault"])
         .assert()
         .success()
         .get_output()
@@ -212,14 +212,14 @@ fn test_vault_key_remove() {
 
     // Remove the backup key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "remove", fingerprint])
+        .args(["keys", "remove", fingerprint])
         .assert()
         .success()
         .stdout(predicate::str::contains("key removed"));
 
     // Verify key was removed
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "vault"])
+        .args(["keys", "list", "--key-type", "vault"])
         .assert()
         .success()
         .stdout(predicate::str::contains("primary"))
@@ -234,7 +234,7 @@ fn test_vault_key_remove_last_key() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -246,7 +246,7 @@ fn test_vault_key_remove_last_key() {
 
     // Get the fingerprint of the only key
     let output = lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "vault"])
+        .args(["keys", "list", "--key-type", "vault"])
         .assert()
         .success()
         .get_output()
@@ -267,7 +267,7 @@ fn test_vault_key_remove_last_key() {
 
     // Try to remove the last key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "remove", fingerprint])
+        .args(["keys", "remove", fingerprint])
         .assert()
         .failure()
         .stdout(
@@ -285,7 +285,7 @@ fn test_host_key_management() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -297,7 +297,7 @@ fn test_host_key_management() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("Host key added successfully"))
@@ -305,7 +305,7 @@ fn test_host_key_management() {
 
     // List host keys
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "host"])
+        .args(["keys", "list", "--key-type", "host"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Keys:"))
@@ -321,7 +321,7 @@ fn test_host_key_add_duplicate() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -333,13 +333,13 @@ fn test_host_key_add_duplicate() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Try to add same hostname again
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Host 'testhost' already exists"));
@@ -354,7 +354,7 @@ fn test_host_key_remove() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -366,20 +366,20 @@ fn test_host_key_remove() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Remove host key by hostname
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "remove", "testhost"])
+        .args(["keys", "remove", "testhost"])
         .assert()
         .success()
         .stdout(predicate::str::contains("key removed"));
 
     // Verify key was removed
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list", "--key-type", "host"])
+        .args(["keys", "list", "--key-type", "host"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No keys found"));
@@ -394,7 +394,7 @@ fn test_secret_storage_from_stdin() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -406,13 +406,13 @@ fn test_secret_storage_from_stdin() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Store secret from stdin
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "secret",
             "store",
             "test-secret",
@@ -439,7 +439,7 @@ fn test_secret_storage_from_file() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -451,13 +451,13 @@ fn test_secret_storage_from_file() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Store secret from file
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "secret",
             "store",
             "file-secret",
@@ -479,7 +479,7 @@ fn test_secret_get_with_vault_key() {
 
     // Initialize vault
     let init_output = lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -504,20 +504,20 @@ fn test_secret_get_with_vault_key() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Store secret
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "store", "test-secret", "--stdin"])
+        .args(["secret", "store", "test-secret", "--stdin"])
         .write_stdin("my-secret-value")
         .assert()
         .success();
 
     // Get secret with vault key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "secret",
             "get",
             "test-secret",
@@ -542,7 +542,7 @@ fn test_secret_list() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -554,13 +554,13 @@ fn test_secret_list() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Store multiple secrets
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "secret",
             "store",
             "secret1",
@@ -573,7 +573,7 @@ fn test_secret_list() {
         .success();
 
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "secret",
             "store",
             "secret2",
@@ -587,7 +587,7 @@ fn test_secret_list() {
 
     // List secrets
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "list"])
+        .args(["secret", "list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Secrets:"))
@@ -606,7 +606,7 @@ fn test_secret_versions() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -618,26 +618,26 @@ fn test_secret_versions() {
 
     // Add host key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
+        .args(["keys", "add-host", "testhost", ssh_key.to_str().unwrap()])
         .assert()
         .success();
 
     // Store same secret multiple times to create versions
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "store", "versioned-secret", "--stdin"])
+        .args(["secret", "store", "versioned-secret", "--stdin"])
         .write_stdin("version1")
         .assert()
         .success();
 
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "store", "versioned-secret", "--stdin"])
+        .args(["secret", "store", "versioned-secret", "--stdin"])
         .write_stdin("version2")
         .assert()
         .success();
 
     // Check versions
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "versions", "versioned-secret"])
+        .args(["secret", "versions", "versioned-secret"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -653,8 +653,8 @@ fn test_error_handling_missing_database() {
     // Test command on non-existent directory should fail
     Command::cargo_bin("lilvault")
         .unwrap()
-        .args(&["--database", "/nonexistent/path/vault.db"])
-        .args(&["keys", "list"])
+        .args(["--database", "/nonexistent/path/vault.db"])
+        .args(["keys", "list"])
         .assert()
         .failure();
 }
@@ -666,13 +666,13 @@ fn test_error_handling_uninitialized_vault() {
 
     // Try to use vault commands without initialization
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "list"])
+        .args(["keys", "list"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Vault not initialized"));
 
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["secret", "list"])
+        .args(["secret", "list"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("Vault not initialized"));
@@ -688,7 +688,7 @@ fn test_error_handling_invalid_ssh_key() {
 
     // Initialize vault
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&[
+        .args([
             "init",
             "--name",
             "primary",
@@ -700,7 +700,7 @@ fn test_error_handling_invalid_ssh_key() {
 
     // Try to add invalid SSH key
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(&["keys", "add-host", "badhost", invalid_key.to_str().unwrap()])
+        .args(["keys", "add-host", "badhost", invalid_key.to_str().unwrap()])
         .assert()
         .failure();
 }
@@ -710,7 +710,7 @@ fn test_help_commands() {
     // Test main help
     Command::cargo_bin("lilvault")
         .unwrap()
-        .args(&["--help"])
+        .args(["--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -720,14 +720,14 @@ fn test_help_commands() {
     // Test subcommand help
     Command::cargo_bin("lilvault")
         .unwrap()
-        .args(&["keys", "--help"])
+        .args(["keys", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Key management"));
 
     Command::cargo_bin("lilvault")
         .unwrap()
-        .args(&["secret", "--help"])
+        .args(["secret", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Secret management"));

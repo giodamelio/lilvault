@@ -31,6 +31,7 @@ async fn reencrypt_secrets_for_new_key(
     new_key: &Key,
     vault_keys: &[Key],
     all_keys: &[Key],
+    password_file: Option<&std::path::Path>,
 ) -> Result<()> {
     info!(
         "🔄 Creating new versions of existing secrets for new key: {}",
@@ -50,13 +51,55 @@ async fn reencrypt_secrets_for_new_key(
         secret_names.len()
     );
 
-    // Get vault key fingerprints for decryption (we need at least one to decrypt)
-    let vault_key_fingerprints: Vec<String> =
-        vault_keys.iter().map(|k| k.fingerprint.clone()).collect();
+    // Select which vault key to use for decryption
+    let selected_vault_key = if vault_keys.len() == 1 {
+        &vault_keys[0]
+    } else {
+        // Multiple vault keys - let user choose (or use first if non-interactive)
+        let key_options: Vec<String> = vault_keys
+            .iter()
+            .map(|k| format!("{} ({})", k.name, &k.fingerprint[..8]))
+            .collect();
 
-    // Cache for decrypted vault key identities (fingerprint -> Identity)
-    let mut decrypted_identities: std::collections::HashMap<String, age::x25519::Identity> =
-        std::collections::HashMap::new();
+        match Select::new()
+            .with_prompt("Select vault key to use for re-encryption")
+            .items(&key_options)
+            .default(0)
+            .interact()
+        {
+            Ok(selection) => &vault_keys[selection],
+            Err(_) => {
+                // Non-interactive environment - use first vault key
+                info!("Non-interactive environment detected, using first vault key");
+                &vault_keys[0]
+            }
+        }
+    };
+
+    info!(
+        "Using vault key '{}' for re-encryption",
+        selected_vault_key.name
+    );
+
+    // Get password for the selected vault key (only once)
+    let password = get_password(
+        &format!(
+            "Enter password for vault key '{}' to decrypt secrets for new version creation",
+            selected_vault_key.name
+        ),
+        password_file,
+    )
+    .into_diagnostic()?;
+
+    // Decrypt the selected vault key identity (only once)
+    let identity = decrypt_master_key(
+        selected_vault_key
+            .encrypted_private_key
+            .as_ref()
+            .expect("Vault key should have private key"),
+        &password,
+    )
+    .into_diagnostic()?;
 
     let mut new_versions_created = 0;
 
@@ -76,57 +119,27 @@ async fn reencrypt_secrets_for_new_key(
             }
         };
 
-        // Get a copy we can decrypt from the latest version
+        // Get a copy we can decrypt from the latest version using our selected vault key
         let source_copy = db
-            .get_decryptable_secret_copy(secret_name, latest_version, &vault_key_fingerprints)
+            .get_decryptable_secret_copy(
+                secret_name,
+                latest_version,
+                &[selected_vault_key.fingerprint.clone()],
+            )
             .await
             .into_diagnostic()?;
 
         let source_copy = match source_copy {
             Some(copy) => copy,
             None => {
-                warn!("  No decryptable copy found for latest version, skipping");
+                warn!(
+                    "  No decryptable copy found for latest version with selected vault key, skipping"
+                );
                 continue;
             }
         };
 
-        // Find the vault key that can decrypt this copy
-        let vault_key = vault_keys
-            .iter()
-            .find(|k| k.fingerprint == source_copy.key_fingerprint)
-            .expect("Vault key should exist");
-
-        // Get or decrypt the identity for this vault key (with caching)
-        let identity = match decrypted_identities.get(&vault_key.fingerprint) {
-            Some(identity) => identity.clone(),
-            None => {
-                // Prompt for password only once per vault key
-                let password = get_password(
-                    &format!(
-                        "Enter password for vault key '{}' to decrypt secrets for new version creation",
-                        vault_key.name
-                    ),
-                    None,
-                )
-                .into_diagnostic()?;
-
-                // Decrypt the vault key identity
-                let identity = decrypt_master_key(
-                    vault_key
-                        .encrypted_private_key
-                        .as_ref()
-                        .expect("Vault key should have private key"),
-                    &password,
-                )
-                .into_diagnostic()?;
-
-                // Cache the decrypted identity
-                decrypted_identities.insert(vault_key.fingerprint.clone(), identity.clone());
-                identity
-            }
-        };
-
-        // Decrypt the secret data using the cached identity
+        // Decrypt the secret data using our pre-decrypted identity
         let decrypted_data =
             decrypt_with_identity(&source_copy.encrypted_data, &identity).into_diagnostic()?;
 
@@ -311,8 +324,8 @@ async fn main() -> Result<()> {
                     no_reencrypt,
                 } => {
                     // Get password
-                    let password = if let Some(path) = password_file {
-                        get_password("", Some(&path)).into_diagnostic()?
+                    let password = if let Some(ref path) = password_file {
+                        get_password("", Some(path)).into_diagnostic()?
                     } else {
                         let password = get_password("Enter password for new vault key", None)
                             .into_diagnostic()?;
@@ -352,8 +365,14 @@ async fn main() -> Result<()> {
                         let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
                         let mut all_keys = all_vault_keys.clone();
                         all_keys.extend(all_host_keys);
-                        reencrypt_secrets_for_new_key(&db, &vault_key, &all_vault_keys, &all_keys)
-                            .await?;
+                        reencrypt_secrets_for_new_key(
+                            &db,
+                            &vault_key,
+                            &all_vault_keys,
+                            &all_keys,
+                            password_file.as_deref(),
+                        )
+                        .await?;
                     } else {
                         info!("Skipping re-encryption due to --no-reencrypt flag");
                     }
@@ -378,6 +397,7 @@ async fn main() -> Result<()> {
                     hostname,
                     key_path,
                     no_reencrypt,
+                    password_file,
                 } => {
                     // Check if hostname already exists
                     if db
@@ -429,8 +449,14 @@ async fn main() -> Result<()> {
                         let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
                         let mut all_keys = all_vault_keys.clone();
                         all_keys.extend(all_host_keys);
-                        reencrypt_secrets_for_new_key(&db, &host_key, &all_vault_keys, &all_keys)
-                            .await?;
+                        reencrypt_secrets_for_new_key(
+                            &db,
+                            &host_key,
+                            &all_vault_keys,
+                            &all_keys,
+                            password_file.as_deref(),
+                        )
+                        .await?;
                     } else {
                         info!("Skipping re-encryption due to --no-reencrypt flag");
                     }

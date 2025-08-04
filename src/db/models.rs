@@ -268,7 +268,7 @@ mod tests {
         let deserialized: AuditLog =
             serde_json::from_str(&json).expect("Should deserialize from JSON");
 
-        assert_eq!(deserialized.success, false);
+        assert!(!deserialized.success);
         assert_eq!(
             deserialized.error_message,
             Some("Invalid password".to_string())

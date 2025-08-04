@@ -157,9 +157,9 @@ mod tests {
     #[test]
     fn test_join_list_mixed_types() {
         // Test with different types that implement Display
-        let floats = vec![1.5, 2.7, 3.14];
+        let floats = vec![1.5, 2.7, 3.15];
         let result = join_list(&floats);
-        assert_eq!(result, "1.5, 2.7, 3.14");
+        assert_eq!(result, "1.5, 2.7, 3.15");
 
         let chars = vec!['a', 'b', 'c'];
         let result = join_list(&chars);

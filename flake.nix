@@ -65,6 +65,9 @@
         # Read Cargo.toml for package metadata
         cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 
+        # MCP Language Server package
+        mcp-language-server = pkgs.callPackage ./mcp-language-server.nix {};
+
         # MCP configuration
         mcpConfig = inputs.mcp-servers.lib.mkConfig pkgs {
           format = "json";
@@ -82,7 +85,7 @@
 
           settings.servers = {
             language-server = {
-              command = "mcp-language-server";
+              command = "${mcp-language-server}/bin/mcp-language-server";
               args = ["--workspace" "." "--lsp" "rust-analyzer"];
             };
           };
@@ -189,7 +192,7 @@
         };
 
         packages = {
-          inherit lilvault;
+          inherit lilvault mcp-language-server;
           default = lilvault;
 
           # Development utility scripts
@@ -298,7 +301,7 @@
 
             # Set up MCP environment
             export MEMORY_FILE_PATH=$(pwd)/.claude/memory.json
-            ln -sf ${mcpConfig}/.mcp.json .mcp.json
+            ln -sf ${mcpConfig} .mcp.json
 
             # Generate initial schema.sql if it doesn't exist
             if [ ! -f db/schema.sql ]; then

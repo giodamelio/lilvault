@@ -72,6 +72,9 @@ pub enum KeyCommands {
         /// Skip re-encrypting existing secrets for this new key
         #[arg(long)]
         no_reencrypt: bool,
+        /// Path to file containing the password for re-encryption (for non-interactive use)
+        #[arg(long)]
+        password_file: Option<PathBuf>,
     },
 
     /// Scan and import host keys like ssh-keyscan

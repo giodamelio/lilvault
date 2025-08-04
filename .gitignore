@@ -20,6 +20,15 @@ db/schema.sql
 # Mutants runs
 mutants.*
 
+# LilVault database files
+vault.db
+vault.db-*
+*.db
+*.db-*
+
+# Test files
+/tmp/test_key*
+password*.txt
 
 # Added by cargo
 #
