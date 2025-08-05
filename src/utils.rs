@@ -2,6 +2,10 @@
 ///
 /// This module contains small, pure functions that can be easily tested
 /// and reused throughout the application.
+use crate::{LilVaultError, Result};
+use std::io::{Read, Write};
+use std::process::Command;
+use tempfile::NamedTempFile;
 /// Parse a comma-separated list of hostnames into a vector
 ///
 /// Trims whitespace from each hostname and filters out empty strings.
@@ -67,6 +71,73 @@ pub fn join_list<T: std::fmt::Display>(items: &[T]) -> String {
         .map(|item| item.to_string())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Launch the user's $EDITOR to edit content and return the edited content
+/// Returns None if content was unchanged, Some(new_content) if changed
+pub fn edit_with_editor(initial_content: &str) -> Result<Option<String>> {
+    edit_with_editor_and_instructions(initial_content, None)
+}
+
+/// Launch the user's $EDITOR to edit content with custom instructions
+/// Returns None if content was unchanged, Some(new_content) if changed
+pub fn edit_with_editor_and_instructions(
+    initial_content: &str,
+    instructions: Option<&str>,
+) -> Result<Option<String>> {
+    // Get editor from environment, no fallback
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .map_err(|_| LilVaultError::Internal {
+            message: "No EDITOR or VISUAL environment variable set. Please set one of these environment variables to your preferred editor.".to_string(),
+        })?;
+
+    // Create a temporary file with the initial content
+    let mut temp_file = NamedTempFile::new()?;
+
+    // Write content in git-like format: content first, then instructions as comments
+    let file_content = if let Some(instr) = instructions {
+        format!("{initial_content}\n# {instr}")
+    } else if initial_content.is_empty() {
+        // For new secrets, start with blank line and instructions below
+        "\n# Please enter your secret above.\n# Lines starting with '#' will be ignored, and an empty message aborts the operation.".to_string()
+    } else {
+        // For existing content, just add it as-is
+        initial_content.to_string()
+    };
+
+    temp_file.write_all(file_content.as_bytes())?;
+    temp_file.flush()?;
+
+    // Launch the editor
+    let status = Command::new(&editor).arg(temp_file.path()).status()?;
+
+    if !status.success() {
+        return Err(LilVaultError::Internal {
+            message: format!("Editor '{editor}' exited with non-zero status"),
+        });
+    }
+
+    // Read the edited content
+    let mut edited_content = String::new();
+    temp_file.reopen()?.read_to_string(&mut edited_content)?;
+
+    // Filter out comment lines and trim whitespace (git-like processing)
+    let filtered_content: String = edited_content
+        .lines()
+        .filter(|line| !line.trim().starts_with('#'))
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .trim() // Trim all leading/trailing whitespace including newlines
+        .to_string();
+
+    // Check if content changed (compare filtered content with original)
+    let original_trimmed = initial_content.trim();
+    if filtered_content == original_trimmed || filtered_content.is_empty() {
+        Ok(None) // No changes or empty content (abort operation)
+    } else {
+        Ok(Some(filtered_content)) // Content changed
+    }
 }
 
 #[cfg(test)]

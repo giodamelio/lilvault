@@ -94,74 +94,17 @@ async fn handle_store(
             .map_err(|e| miette::miette!("Failed to read file '{}': {}", file_path.display(), e))?
     } else {
         // Default: use $EDITOR to edit the secret
-        use std::io::Write;
-        use std::process::Command;
-        use tempfile::NamedTempFile;
+        use lilvault::utils::edit_with_editor;
 
-        // Get editor from environment or use default
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-            // Try common editors as fallbacks
-            if which::which("nano").is_ok() {
-                "nano".to_string()
-            } else if which::which("vim").is_ok() {
-                "vim".to_string()
-            } else if which::which("vi").is_ok() {
-                "vi".to_string()
-            } else {
-                error!("No EDITOR environment variable set and no common editors (nano, vim, vi) found in PATH");
+        info!("Opening editor to input secret");
+
+        match edit_with_editor("").into_diagnostic()? {
+            Some(content) => content.as_bytes().to_vec(),
+            None => {
+                error!("No secret content provided");
                 std::process::exit(1);
             }
-        });
-
-        info!("Opening editor to input secret: {}", editor);
-
-        // Create temporary file
-        let mut temp_file = NamedTempFile::new()
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to create temporary file: {}", e))?;
-
-        // Write placeholder content (git-style with instructions below)
-        temp_file.write_all(b"\n# Please enter your secret above.\n# Lines starting with '#' will be ignored, and an empty message aborts the operation.\n")
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to write to temporary file: {}", e))?;
-
-        temp_file
-            .flush()
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to flush temporary file: {}", e))?;
-
-        // Open editor
-        let status = Command::new(&editor)
-            .arg(temp_file.path())
-            .status()
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to launch editor '{}': {}", editor, e))?;
-
-        if !status.success() {
-            error!("Editor exited with non-zero status");
-            std::process::exit(1);
         }
-
-        // Read the edited content
-        let content = fs::read_to_string(temp_file.path())
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to read edited content: {}", e))?;
-
-        // Filter out comment lines and get final content
-        let filtered_content: String = content
-            .lines()
-            .filter(|line| !line.trim().starts_with('#'))
-            .collect::<Vec<&str>>()
-            .join("\n")
-            .trim() // Trim all leading/trailing whitespace including newlines
-            .to_string();
-
-        if filtered_content.is_empty() {
-            error!("No secret content provided (empty or only comments)");
-            std::process::exit(1);
-        }
-
-        filtered_content.as_bytes().to_vec()
     };
 
     // Get all vault keys and specified host keys
@@ -913,10 +856,11 @@ async fn handle_edit(
 
     use dialoguer::Select;
     use lilvault::crypto::{
-        decrypt_secret_with_vault_key, edit_with_editor, encrypt_for_recipients, get_password,
-        host_key_to_recipient, vault_key_to_recipient,
+        decrypt_secret_with_vault_key, encrypt_for_recipients, get_password, host_key_to_recipient,
+        vault_key_to_recipient,
     };
     use lilvault::db::models::SecretStorage;
+    use lilvault::utils::edit_with_editor;
     use miette::IntoDiagnostic;
     use tracing::{error, info};
 

@@ -10,8 +10,6 @@ use age::{
 };
 use dialoguer::Password;
 use std::io::{Read, Write};
-use std::process::Command;
-use tempfile::NamedTempFile;
 
 /// Generate a new age X25519 key pair and encrypt the private key with a password
 pub fn generate_master_key(password: &str) -> Result<(String, Vec<u8>)> {
@@ -260,55 +258,6 @@ pub fn encrypt_for_single_recipient(
     encrypt_for_recipients(data, vec![recipient])
 }
 
-/// Launch the user's $EDITOR to edit content and return the edited content
-/// Returns None if content was unchanged, Some(new_content) if changed
-pub fn edit_with_editor(initial_content: &str) -> Result<Option<String>> {
-    // Get editor from environment, fallback to common defaults
-    let editor = std::env::var("EDITOR")
-        .or_else(|_| std::env::var("VISUAL"))
-        .unwrap_or_else(|_| {
-            // Try to find a reasonable default editor
-            for editor in ["nano", "vim", "vi", "emacs"] {
-                if Command::new("which")
-                    .arg(editor)
-                    .output()
-                    .map(|output| output.status.success())
-                    .unwrap_or(false)
-                {
-                    return editor.to_string();
-                }
-            }
-            "nano".to_string() // Final fallback
-        });
-
-    // Create a temporary file with the initial content
-    let mut temp_file = NamedTempFile::new()?;
-
-    // Write initial content to temp file
-    temp_file.write_all(initial_content.as_bytes())?;
-    temp_file.flush()?;
-
-    // Launch the editor
-    let status = Command::new(&editor).arg(temp_file.path()).status()?;
-
-    if !status.success() {
-        return Err(LilVaultError::Internal {
-            message: format!("Editor '{editor}' exited with non-zero status"),
-        });
-    }
-
-    // Read the edited content
-    let mut edited_content = String::new();
-    temp_file.reopen()?.read_to_string(&mut edited_content)?;
-
-    // Check if content changed
-    if edited_content == initial_content {
-        Ok(None) // No changes
-    } else {
-        Ok(Some(edited_content)) // Content changed
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,28 +503,6 @@ mod tests {
             }
             _ => panic!("Expected SshKey error"),
         }
-    }
-
-    #[test]
-    fn test_edit_with_editor_no_changes() {
-        // Mock editor that doesn't change content by setting EDITOR to cat
-        std::env::set_var("EDITOR", "cat");
-
-        let initial_content = "unchanged content";
-        let result = edit_with_editor(initial_content);
-
-        assert!(result.is_ok(), "Should succeed with cat as editor");
-        match result.unwrap() {
-            None => {
-                // This is expected - content should be unchanged when using cat
-            }
-            Some(_) => {
-                // cat might add a newline on some systems, this is also acceptable
-            }
-        }
-
-        // Clean up
-        std::env::remove_var("EDITOR");
     }
 }
 
