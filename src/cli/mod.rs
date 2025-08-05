@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum, ValueHint};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -52,6 +52,49 @@ pub enum Commands {
         #[command(subcommand)]
         command: ExportCommands,
     },
+
+    /// Generate shell completion scripts
+    Completion {
+        /// Shell to generate completion for
+        #[arg(value_enum)]
+        shell: CompletionShell,
+    },
+
+    /// Internal completion helper (hidden from help)
+    #[command(hide = true)]
+    CompleteValues {
+        /// Type of values to complete
+        #[arg(value_enum)]
+        value_type: CompletionValueType,
+        /// Optional filter prefix
+        prefix: Option<String>,
+    },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum CompletionShell {
+    /// Bash shell completion
+    Bash,
+    /// Zsh shell completion
+    Zsh,
+    /// Fish shell completion
+    Fish,
+    /// PowerShell completion
+    PowerShell,
+    /// Elvish shell completion
+    Elvish,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum CompletionValueType {
+    /// Complete secret names
+    Secrets,
+    /// Complete key identifiers (hostnames and fingerprints)
+    Keys,
+    /// Complete vault key names
+    VaultKeys,
+    /// Complete host key names/hostnames
+    HostKeys,
 }
 
 #[derive(Subcommand, Debug)]
@@ -108,12 +151,14 @@ pub enum KeyCommands {
     /// Remove a key
     Remove {
         /// Key fingerprint or hostname to remove
+        #[arg(value_hint = ValueHint::Other)]
         identifier: String,
     },
 
     /// Rename a key
     Rename {
         /// Key fingerprint, vault key name, or hostname to rename
+        #[arg(value_hint = ValueHint::Other)]
         identifier: String,
         /// New name for the key
         new_name: String,
@@ -122,6 +167,7 @@ pub enum KeyCommands {
     /// List secrets accessible by a host key
     ListSecrets {
         /// Hostname or key fingerprint to check access for
+        #[arg(value_hint = ValueHint::Other)]
         identifier: String,
     },
 }
@@ -131,6 +177,7 @@ pub enum SecretCommands {
     /// Store a secret
     Store {
         /// Name of the secret
+        #[arg(value_hint = ValueHint::Other)]
         name: String,
         /// Hosts that should have access to this secret (defaults to all hosts if none specified)
         hosts: Vec<String>,
@@ -148,6 +195,7 @@ pub enum SecretCommands {
     /// Retrieve a secret
     Get {
         /// Name of the secret
+        #[arg(value_hint = ValueHint::Other)]
         name: String,
         /// Specific version to retrieve
         #[arg(long)]
@@ -170,6 +218,7 @@ pub enum SecretCommands {
     /// Show information about a secret without exposing its content
     Info {
         /// Name of the secret
+        #[arg(value_hint = ValueHint::Other)]
         name: String,
     },
 
@@ -182,6 +231,7 @@ pub enum SecretCommands {
     /// Generate a random secret and store it
     Generate {
         /// Name of the secret
+        #[arg(value_hint = ValueHint::Other)]
         name: String,
         /// Hosts that should have access to this secret (defaults to all hosts if none specified)
         hosts: Vec<String>,
