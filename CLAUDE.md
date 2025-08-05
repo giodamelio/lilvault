@@ -17,8 +17,25 @@ LilVault is a single-file SQLite-based secrets manager that allows you to safely
 
 ## Development Principles
 
-- Never modify existing migrations
-- Don't edit migrations that have already been used. Add new ones to make changes to the db schema.
+### Database Migration Rules (CRITICAL)
+**NEVER MODIFY EXISTING MIGRATIONS** - This is a cardinal rule that must never be broken.
+
+- **Immutable migrations**: Once a migration is committed and potentially applied, it MUST NOT be modified
+- **SQLx checksums**: SQLx stores checksums of applied migrations and will error if they change
+- **Production safety**: Modifying migrations can cause database corruption or deployment failures
+- **Add new migrations**: Always create new migrations for schema changes, never edit existing ones
+- **Rollback process**: If a migration needs changes, revert it to original state and create a new migration
+
+#### If You Accidentally Modify a Migration:
+1. **Immediately revert** the migration file to its original committed state
+2. **Create a new migration** with any changes that were needed
+3. **Never commit** modified migrations to source control
+4. **Test thoroughly** that the fix works on both fresh and existing databases
+
+#### Migration Naming Convention:
+- `001_initial_schema.sql` - Initial database schema
+- `002_add_feature.sql` - Add new tables/columns for feature
+- `003_fix_indexes.sql` - Schema corrections (never modify previous migrations)
 
 ## Architecture
 
