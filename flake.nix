@@ -109,6 +109,7 @@
             nativeBuildInputs = with pkgs; [
               pkg-config
               sqlx-cli
+              installShellFiles
             ];
 
             buildInputs = with pkgs; [
@@ -119,6 +120,28 @@
             # Set up database for SQLx compile-time verification
             preBuild = ''
               export DATABASE_URL=sqlite:${sqlx-db}/db.sqlite3
+            '';
+
+            # Generate and install shell completions
+            postInstall = ''
+              # Generate shell completions for all supported shells
+              $out/bin/lilvault completion bash > lilvault.bash
+              $out/bin/lilvault completion zsh > lilvault.zsh
+              $out/bin/lilvault completion fish > lilvault.fish
+              $out/bin/lilvault completion power-shell > lilvault.ps1
+              $out/bin/lilvault completion elvish > lilvault.elv
+
+              # Install completions to standard locations (bash, zsh, fish are supported)
+              installShellCompletion \
+                --bash lilvault.bash \
+                --zsh lilvault.zsh \
+                --fish lilvault.fish
+
+              # Manually install PowerShell and Elvish completions to share directory
+              # These shells don't have native installShellCompletion support yet
+              mkdir -p $out/share/lilvault/completions
+              cp lilvault.ps1 $out/share/lilvault/completions/
+              cp lilvault.elv $out/share/lilvault/completions/
             '';
 
             # Skip tests in Nix build (tests require interactive terminal features)

@@ -76,6 +76,21 @@ cd lilvault
 cargo build --release
 ```
 
+### Nix Package
+
+If you're using Nix, the package includes shell completions for all supported shells:
+
+```bash
+nix build .#lilvault
+```
+
+**Completion Files Included:**
+- **Bash, Zsh, Fish**: Installed to standard system locations (auto-discovered by shells)
+- **PowerShell**: Available at `$out/share/lilvault/completions/lilvault.ps1`
+- **Elvish**: Available at `$out/share/lilvault/completions/lilvault.elv`
+
+To manually install PowerShell/Elvish completions, copy them to your shell's completion directory or source them in your shell configuration.
+
 ## Contributing
 
 This is an experimental project. While contributions are welcome, please understand that this is not production software and the codebase may change dramatically or be abandoned at any time.
