@@ -264,15 +264,6 @@ pub enum ExportCommands {
         /// Output file (stdout if not specified)
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
-        /// Include vault keys in the graph
-        #[arg(long, default_value = "true")]
-        include_vault_keys: bool,
-        /// Include host keys in the graph
-        #[arg(long, default_value = "true")]
-        include_host_keys: bool,
-        /// Include secrets in the graph
-        #[arg(long)]
-        include_secrets: bool,
     },
 
     /// Export keys as CSV
@@ -280,11 +271,5 @@ pub enum ExportCommands {
         /// Output file (stdout if not specified)
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
-        /// Filter by key type (vault or host)
-        #[arg(long)]
-        key_type: Option<String>,
-        /// Include secret values in the export (metadata always included)
-        #[arg(long)]
-        include_secret_values: bool,
     },
 }

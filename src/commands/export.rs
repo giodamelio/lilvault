@@ -8,39 +8,17 @@ use tracing::info;
 /// Handle export commands
 pub async fn handle_export(db: &Database, command: ExportCommands) -> Result<()> {
     match command {
-        ExportCommands::Dot {
-            output,
-            include_vault_keys,
-            include_host_keys,
-            include_secrets: _,
-        } => handle_dot_export(db, output, include_vault_keys, include_host_keys).await,
+        ExportCommands::Dot { output } => handle_dot_export(db, output).await,
 
-        ExportCommands::Csv {
-            output,
-            key_type,
-            include_secret_values,
-        } => handle_csv_export(db, output, key_type, include_secret_values).await,
+        ExportCommands::Csv { output } => handle_csv_export(db, output).await,
     }
 }
 
-async fn handle_dot_export(
-    db: &Database,
-    output: Option<std::path::PathBuf>,
-    include_vault_keys: bool,
-    include_host_keys: bool,
-) -> Result<()> {
-    // Get all keys
-    let mut all_keys = Vec::new();
-
-    if include_vault_keys {
-        let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
-        all_keys.extend(vault_keys);
-    }
-
-    if include_host_keys {
-        let host_keys = db.get_all_host_keys().await.into_diagnostic()?;
-        all_keys.extend(host_keys);
-    }
+async fn handle_dot_export(db: &Database, output: Option<std::path::PathBuf>) -> Result<()> {
+    // Get all keys (always include both vault and host keys)
+    let mut all_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+    let mut host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+    all_keys.append(&mut host_keys);
 
     // Always get secrets metadata for DOT graph
     let secrets = db.get_all_secrets().await.into_diagnostic()?;
@@ -140,93 +118,42 @@ async fn handle_dot_export(
     Ok(())
 }
 
-async fn handle_csv_export(
-    db: &Database,
-    output: Option<std::path::PathBuf>,
-    key_type: Option<String>,
-    include_secret_values: bool,
-) -> Result<()> {
-    let keys = if let Some(filter_type) = key_type {
-        if filter_type == "vault" {
-            db.get_all_vault_keys().await.into_diagnostic()?
-        } else if filter_type == "host" {
-            db.get_all_host_keys().await.into_diagnostic()?
-        } else {
-            return Err(miette::miette!(
-                "Invalid key type '{}'. Use 'vault' or 'host'",
-                filter_type
-            ));
-        }
-    } else {
-        // Get all keys
-        let mut all_keys = db.get_all_vault_keys().await.into_diagnostic()?;
-        let mut host_keys = db.get_all_host_keys().await.into_diagnostic()?;
-        all_keys.append(&mut host_keys);
-        all_keys.sort_by(|a, b| a.name.cmp(&b.name));
-        all_keys
-    };
+async fn handle_csv_export(db: &Database, output: Option<std::path::PathBuf>) -> Result<()> {
+    // Get all keys (always include both vault and host keys)
+    let mut all_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+    let mut host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+    all_keys.append(&mut host_keys);
+    all_keys.sort_by(|a, b| a.name.cmp(&b.name));
 
     // Always get secrets metadata
     let secrets = db.get_all_secrets().await.into_diagnostic()?;
 
-    // Generate CSV content
+    // Generate CSV content (always export all data)
     let mut csv_content = String::new();
+    csv_content.push_str("type,identifier,name,key_type,created_at,updated_at,description\n");
 
-    if include_secret_values {
-        // Export with secret values included
-        csv_content.push_str(
-            "type,identifier,name,key_type,created_at,updated_at,description,secret_value\n",
-        );
+    // Add all keys
+    for key in all_keys {
+        csv_content.push_str(&format!(
+            "key,{},{},{},{},{},\n",
+            key.fingerprint,
+            key.name,
+            key.key_type,
+            key.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
+            key.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+        ));
+    }
 
-        // Add keys
-        for key in keys {
-            csv_content.push_str(&format!(
-                "key,{},{},{},{},{},,\n",
-                key.fingerprint,
-                key.name,
-                key.key_type,
-                key.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                key.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-        }
-
-        // Add secrets with placeholder values
-        for secret in secrets {
-            csv_content.push_str(&format!(
-                "secret,{},{},secret,{},{},{},\"[SECRET_VALUE_TODO]\"\n",
-                secret.name,
-                secret.name,
-                secret.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                secret.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                secret.description.as_deref().unwrap_or("")
-            ));
-        }
-    } else {
-        // Export with metadata only (default)
-        csv_content.push_str("type,identifier,name,key_type,created_at,updated_at,description\n");
-
-        for key in keys {
-            csv_content.push_str(&format!(
-                "key,{},{},{},{},{},\n",
-                key.fingerprint,
-                key.name,
-                key.key_type,
-                key.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                key.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
-            ));
-        }
-
-        // Add secrets metadata
-        for secret in secrets {
-            csv_content.push_str(&format!(
-                "secret,{},{},secret,{},{},{}\n",
-                secret.name,
-                secret.name,
-                secret.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                secret.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
-                secret.description.as_deref().unwrap_or("")
-            ));
-        }
+    // Add all secrets metadata
+    for secret in secrets {
+        csv_content.push_str(&format!(
+            "secret,{},{},secret,{},{},{}\n",
+            secret.name,
+            secret.name,
+            secret.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
+            secret.updated_at.format("%Y-%m-%d %H:%M:%S UTC"),
+            secret.description.as_deref().unwrap_or("")
+        ));
     }
 
     // Write output
