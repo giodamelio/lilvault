@@ -856,8 +856,8 @@ async fn handle_edit(
 
     use dialoguer::Select;
     use lilvault::crypto::{
-        decrypt_secret_with_vault_key, encrypt_for_recipients, get_password, host_key_to_recipient,
-        vault_key_to_recipient,
+        Recipient, decrypt_secret_with_vault_key, encrypt_for_recipients, get_password,
+        host_key_to_recipient, vault_key_to_recipient,
     };
     use lilvault::db::models::SecretStorage;
     use lilvault::utils::edit_with_editor;
@@ -972,7 +972,7 @@ async fn handle_edit(
             let host_keys = db.get_keys_by_type("host").await.into_diagnostic()?;
 
             // Create recipients from all keys
-            let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+            let mut recipients: Vec<Recipient> = Vec::new();
 
             for key in &vault_keys {
                 recipients.push(vault_key_to_recipient(&key.public_key).into_diagnostic()?);
@@ -1061,8 +1061,8 @@ async fn handle_share(
     use chrono::Utc;
     use dialoguer::Select;
     use lilvault::crypto::{
-        decrypt_secret_with_vault_key, encrypt_for_recipients, get_password, host_key_to_recipient,
-        vault_key_to_recipient,
+        Recipient, decrypt_secret_with_vault_key, encrypt_for_recipients, get_password,
+        host_key_to_recipient, vault_key_to_recipient,
     };
     use lilvault::db::models::{SecretKey, SecretStorage};
     use miette::IntoDiagnostic;
@@ -1240,7 +1240,7 @@ async fn handle_share(
         all_host_keys.push(host_key.clone());
 
         // Create recipients for all keys (vault + all host keys)
-        let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+        let mut recipients: Vec<Recipient> = Vec::new();
 
         for key in &current_vault_keys {
             recipients.push(vault_key_to_recipient(&key.public_key).into_diagnostic()?);

@@ -11,6 +11,10 @@ use age::{
 use dialoguer::Password;
 use std::io::{Read, Write};
 
+// Type aliases to abstract away age-specific types from other modules
+pub type Recipient = Box<dyn age::Recipient + Send>;
+pub type SshIdentityType = SshIdentity;
+
 /// Generate a new age X25519 key pair and encrypt the private key with a password
 pub fn generate_master_key(password: &str) -> Result<(String, Vec<u8>)> {
     // Generate new identity
@@ -65,10 +69,7 @@ pub fn generate_fingerprint(public_key: &str) -> String {
 }
 
 /// Encrypt data with multiple recipients
-pub fn encrypt_for_recipients(
-    data: &[u8],
-    recipients: Vec<Box<dyn age::Recipient + Send>>,
-) -> Result<Vec<u8>> {
+pub fn encrypt_for_recipients(data: &[u8], recipients: Vec<Recipient>) -> Result<Vec<u8>> {
     let encryptor = match Encryptor::with_recipients(recipients) {
         Some(enc) => enc,
         None => {
@@ -79,19 +80,26 @@ pub fn encrypt_for_recipients(
     };
 
     let mut encrypted = vec![];
-    let writer = ArmoredWriter::wrap_output(&mut encrypted, Format::AsciiArmor)
-        .map_err(|e| LilVaultError::Encryption(e.into()))?;
+    let writer = ArmoredWriter::wrap_output(&mut encrypted, Format::AsciiArmor).map_err(|e| {
+        LilVaultError::Encryption {
+            message: e.to_string(),
+        }
+    })?;
 
     let mut age_writer = encryptor
         .wrap_output(writer)
-        .map_err(LilVaultError::Encryption)?;
+        .map_err(|e| LilVaultError::Encryption {
+            message: e.to_string(),
+        })?;
 
     age_writer.write_all(data).map_err(LilVaultError::Io)?;
 
     age_writer
         .finish()
         .and_then(|armor_writer| armor_writer.finish())
-        .map_err(|e| LilVaultError::Encryption(e.into()))?;
+        .map_err(|e| LilVaultError::Encryption {
+            message: e.to_string(),
+        })?;
 
     Ok(encrypted)
 }
@@ -99,7 +107,9 @@ pub fn encrypt_for_recipients(
 /// Decrypt data with an identity
 pub fn decrypt_with_identity(encrypted_data: &[u8], identity: &Identity) -> Result<Vec<u8>> {
     let armored_reader = ArmoredReader::new(encrypted_data);
-    let decryptor = match Decryptor::new(armored_reader).map_err(LilVaultError::Decryption)? {
+    let decryptor = match Decryptor::new(armored_reader).map_err(|e| LilVaultError::Decryption {
+        message: e.to_string(),
+    })? {
         Decryptor::Recipients(d) => d,
         _ => {
             return Err(LilVaultError::Internal {
@@ -111,7 +121,9 @@ pub fn decrypt_with_identity(encrypted_data: &[u8], identity: &Identity) -> Resu
     let mut decrypted = Vec::new();
     let mut reader = decryptor
         .decrypt(std::iter::once(identity as &dyn age::Identity))
-        .map_err(LilVaultError::Decryption)?;
+        .map_err(|e| LilVaultError::Decryption {
+            message: e.to_string(),
+        })?;
 
     reader
         .read_to_end(&mut decrypted)
@@ -123,10 +135,12 @@ pub fn decrypt_with_identity(encrypted_data: &[u8], identity: &Identity) -> Resu
 /// Decrypt data with SSH identity
 pub fn decrypt_with_ssh_identity(
     encrypted_data: &[u8],
-    ssh_identity: &SshIdentity,
+    ssh_identity: &SshIdentityType,
 ) -> Result<Vec<u8>> {
     let armored_reader = ArmoredReader::new(encrypted_data);
-    let decryptor = match Decryptor::new(armored_reader).map_err(LilVaultError::Decryption)? {
+    let decryptor = match Decryptor::new(armored_reader).map_err(|e| LilVaultError::Decryption {
+        message: e.to_string(),
+    })? {
         Decryptor::Recipients(d) => d,
         _ => {
             return Err(LilVaultError::Internal {
@@ -138,7 +152,9 @@ pub fn decrypt_with_ssh_identity(
     let mut decrypted = Vec::new();
     let mut reader = decryptor
         .decrypt(std::iter::once(ssh_identity as &dyn age::Identity))
-        .map_err(LilVaultError::Decryption)?;
+        .map_err(|e| LilVaultError::Decryption {
+            message: e.to_string(),
+        })?;
 
     reader
         .read_to_end(&mut decrypted)
@@ -165,19 +181,26 @@ fn encrypt_with_password(data: &[u8], password: &str) -> Result<Vec<u8>> {
     let encryptor = Encryptor::with_user_passphrase(Secret::new(password.to_owned()));
 
     let mut encrypted = vec![];
-    let writer = ArmoredWriter::wrap_output(&mut encrypted, Format::AsciiArmor)
-        .map_err(|e| LilVaultError::Encryption(e.into()))?;
+    let writer = ArmoredWriter::wrap_output(&mut encrypted, Format::AsciiArmor).map_err(|e| {
+        LilVaultError::Encryption {
+            message: e.to_string(),
+        }
+    })?;
 
     let mut age_writer = encryptor
         .wrap_output(writer)
-        .map_err(LilVaultError::Encryption)?;
+        .map_err(|e| LilVaultError::Encryption {
+            message: e.to_string(),
+        })?;
 
     age_writer.write_all(data).map_err(LilVaultError::Io)?;
 
     age_writer
         .finish()
         .and_then(|armor_writer| armor_writer.finish())
-        .map_err(|e| LilVaultError::Encryption(e.into()))?;
+        .map_err(|e| LilVaultError::Encryption {
+            message: e.to_string(),
+        })?;
 
     Ok(encrypted)
 }
@@ -185,7 +208,9 @@ fn encrypt_with_password(data: &[u8], password: &str) -> Result<Vec<u8>> {
 /// Decrypt data with password (for master key storage)
 fn decrypt_with_password(encrypted_data: &[u8], password: &str) -> Result<Vec<u8>> {
     let armored_reader = ArmoredReader::new(encrypted_data);
-    let decryptor = match Decryptor::new(armored_reader).map_err(LilVaultError::Decryption)? {
+    let decryptor = match Decryptor::new(armored_reader).map_err(|e| LilVaultError::Decryption {
+        message: e.to_string(),
+    })? {
         Decryptor::Passphrase(d) => d,
         _ => {
             return Err(LilVaultError::Internal {
@@ -197,7 +222,9 @@ fn decrypt_with_password(encrypted_data: &[u8], password: &str) -> Result<Vec<u8
     let mut decrypted = Vec::new();
     let mut reader = decryptor
         .decrypt(&Secret::new(password.to_owned()), None)
-        .map_err(LilVaultError::Decryption)?;
+        .map_err(|e| LilVaultError::Decryption {
+            message: e.to_string(),
+        })?;
 
     reader
         .read_to_end(&mut decrypted)
@@ -234,7 +261,7 @@ pub fn get_password(prompt: &str, password_file: Option<&std::path::Path>) -> Re
 }
 
 /// Convert vault key to age recipient for encryption
-pub fn vault_key_to_recipient(public_key: &str) -> Result<Box<dyn age::Recipient + Send>> {
+pub fn vault_key_to_recipient(public_key: &str) -> Result<Recipient> {
     let recipient =
         public_key
             .parse::<age::x25519::Recipient>()
@@ -245,17 +272,44 @@ pub fn vault_key_to_recipient(public_key: &str) -> Result<Box<dyn age::Recipient
 }
 
 /// Convert host SSH key to age recipient for encryption
-pub fn host_key_to_recipient(ssh_public_key: &str) -> Result<Box<dyn age::Recipient + Send>> {
+pub fn host_key_to_recipient(ssh_public_key: &str) -> Result<Recipient> {
     let recipient = parse_ssh_public_key(ssh_public_key)?;
     Ok(Box::new(recipient))
 }
 
 /// Encrypt data for a single recipient (used for re-encryption)
-pub fn encrypt_for_single_recipient(
-    data: &[u8],
-    recipient: Box<dyn age::Recipient + Send>,
-) -> Result<Vec<u8>> {
+pub fn encrypt_for_single_recipient(data: &[u8], recipient: Recipient) -> Result<Vec<u8>> {
     encrypt_for_recipients(data, vec![recipient])
+}
+
+/// Load SSH identity from host (used by export functionality)
+pub fn load_host_ssh_identity(hostname: &str) -> Result<SshIdentityType> {
+    let ssh_dir = std::env::var("HOME")
+        .map(|home| std::path::PathBuf::from(home).join(".ssh"))
+        .map_err(|_| LilVaultError::Internal {
+            message: "Unable to determine home directory".to_string(),
+        })?;
+
+    // Try common SSH key files
+    let key_files = ["id_ed25519", "id_ecdsa", "id_rsa"];
+
+    for key_file in &key_files {
+        let key_path = ssh_dir.join(key_file);
+        if key_path.exists() {
+            let key_data = std::fs::read(&key_path).map_err(|e| LilVaultError::Internal {
+                message: format!("Failed to read SSH key file {}: {}", key_path.display(), e),
+            })?;
+
+            let cursor = std::io::Cursor::new(key_data);
+            if let Ok(identity) = SshIdentity::from_buffer(cursor, None) {
+                return Ok(identity);
+            }
+        }
+    }
+
+    Err(LilVaultError::Internal {
+        message: format!("No suitable SSH identity found for host: {hostname}"),
+    })
 }
 
 #[cfg(test)]
@@ -424,7 +478,7 @@ mod tests {
 
         // Encrypt data
         let recipient = identity.to_public();
-        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![Box::new(recipient)];
+        let recipients: Vec<Recipient> = vec![Box::new(recipient)];
         let encrypted_data = encrypt_for_recipients(test_data, recipients)
             .expect("Should encrypt data successfully");
 
@@ -442,7 +496,7 @@ mod tests {
     #[test]
     fn test_encrypt_for_recipients_empty_recipients() {
         let test_data = b"test data";
-        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![];
+        let recipients: Vec<Recipient> = vec![];
 
         let result = encrypt_for_recipients(test_data, recipients);
         assert!(result.is_err(), "Should fail with empty recipients list");
@@ -472,7 +526,7 @@ mod tests {
 
         // Encrypt data with the vault key
         let recipient = identity.to_public();
-        let recipients: Vec<Box<dyn age::Recipient + Send>> = vec![Box::new(recipient)];
+        let recipients: Vec<Recipient> = vec![Box::new(recipient)];
         let encrypted_data =
             encrypt_for_recipients(test_data, recipients).expect("Should encrypt data");
 

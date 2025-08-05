@@ -1,9 +1,9 @@
 use dialoguer::Select;
 use lilvault::cli::KeyCommands;
 use lilvault::crypto::{
-    decrypt_master_key, decrypt_with_identity, encrypt_for_recipients, generate_fingerprint,
-    generate_master_key, get_password, get_password_with_confirmation, host_key_to_recipient,
-    parse_ssh_public_key, vault_key_to_recipient,
+    Recipient, decrypt_master_key, decrypt_with_identity, encrypt_for_recipients,
+    generate_fingerprint, generate_master_key, get_password, get_password_with_confirmation,
+    host_key_to_recipient, parse_ssh_public_key, vault_key_to_recipient,
 };
 use lilvault::db::{
     Database,
@@ -698,7 +698,7 @@ async fn reencrypt_secrets_for_new_key(
             .into_diagnostic()?;
 
         // Create recipients for ALL keys (existing + new key)
-        let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+        let mut recipients: Vec<Recipient> = Vec::new();
 
         for key in all_keys {
             let recipient = match key.key_type.as_str() {

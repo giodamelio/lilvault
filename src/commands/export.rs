@@ -349,38 +349,8 @@ async fn handle_systemd_creds_export(
 }
 
 /// Load SSH private key for the host
-fn load_host_ssh_identity(hostname: &str) -> Result<age::ssh::Identity> {
-    use std::fs;
-
-    // Try common SSH private key locations for hosts
-    let potential_paths = [
-        "/etc/ssh/ssh_host_ed25519_key".to_string(),
-        "/etc/ssh/ssh_host_rsa_key".to_string(),
-        "/etc/ssh/ssh_host_ecdsa_key".to_string(),
-        format!("/home/{hostname}/.ssh/id_ed25519"),
-        format!("/home/{hostname}/.ssh/id_rsa"),
-        format!("/home/{hostname}/.ssh/id_ecdsa"),
-        "/root/.ssh/id_ed25519".to_string(),
-        "/root/.ssh/id_rsa".to_string(),
-        "/root/.ssh/id_ecdsa".to_string(),
-    ];
-
-    for path_str in &potential_paths {
-        if let Ok(key_data) = fs::read(path_str) {
-            // Try to create SSH identity from the key data
-            let cursor = std::io::Cursor::new(key_data);
-            if let Ok(identity) = age::ssh::Identity::from_buffer(cursor, None) {
-                info!("Loaded SSH private key from: {}", path_str);
-                return Ok(identity);
-            }
-        }
-    }
-
-    Err(miette::miette!(
-        "Could not find SSH private key for host '{}'. Tried paths: {}",
-        hostname,
-        potential_paths.join(", ")
-    ))
+fn load_host_ssh_identity(hostname: &str) -> Result<lilvault::crypto::SshIdentityType> {
+    lilvault::crypto::load_host_ssh_identity(hostname).into_diagnostic()
 }
 
 /// Check if the current process is running as root

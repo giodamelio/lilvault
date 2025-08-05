@@ -17,19 +17,19 @@ pub enum LilVaultError {
     )]
     Migration(#[from] sqlx::migrate::MigrateError),
 
-    #[error("Age encryption error")]
+    #[error("Encryption error: {message}")]
     #[diagnostic(
         code(lilvault::encryption_error),
         help("Check key format and encryption parameters")
     )]
-    Encryption(#[from] age::EncryptError),
+    Encryption { message: String },
 
-    #[error("Age decryption error")]
+    #[error("Decryption error: {message}")]
     #[diagnostic(
         code(lilvault::decryption_error),
         help("Verify the correct key is being used and data is not corrupted")
     )]
-    Decryption(#[from] age::DecryptError),
+    Decryption { message: String },
 
     #[error("SSH key parsing error: {message}")]
     #[diagnostic(
