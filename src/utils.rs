@@ -131,12 +131,17 @@ pub fn edit_with_editor_and_instructions(
         .trim() // Trim all leading/trailing whitespace including newlines
         .to_string();
 
-    // Check if content changed (compare filtered content with original)
-    let original_trimmed = initial_content.trim();
-    if filtered_content == original_trimmed || filtered_content.is_empty() {
-        Ok(None) // No changes or empty content (abort operation)
+    // Check if content is empty (abort operation)
+    if filtered_content.is_empty() {
+        Ok(None) // Empty content (abort operation)
     } else {
-        Ok(Some(filtered_content)) // Content changed
+        // Compare filtered content with original content (not trimmed original)
+        // This way we detect when whitespace trimming should be applied
+        if filtered_content == initial_content {
+            Ok(None) // No changes
+        } else {
+            Ok(Some(filtered_content)) // Content changed or whitespace trimmed
+        }
     }
 }
 
