@@ -166,7 +166,7 @@ When creating new tables, ensure you:
 4. ✅ Update the Rust model struct to include both timestamp fields
 5. ✅ Update all database queries to handle the new columns
 6. ✅ Add unit tests for the new model serialization/deserialization
-7. ✅ Run `dump-schema` to update `db/schema.sql`
+7. ✅ Run `./bin/dump-schema.sh` to update `db/schema.sql`
 
 ### Schema Documentation
 The project maintains a `db/schema.sql` file (similar to Rails' `db/schema.rb`) that contains the complete, up-to-date database schema. This file is:
@@ -174,7 +174,7 @@ The project maintains a `db/schema.sql` file (similar to Rails' `db/schema.rb`) 
 - **Auto-generated** from the current migration state
 - **Read-only** - never edit directly, create migrations instead
 - **Version controlled** for easy schema diffing and understanding
-- **Updated** automatically on devenv entry and manually via `dump-schema`
+- **Updated** automatically on devenv entry and manually via `./bin/dump-schema.sh`
 
 This provides a single source of truth for the current database structure without needing to piece together multiple migration files.
 
@@ -277,8 +277,8 @@ cargo test
 RUST_LOG=debug cargo run
 
 # Database operations
-cargo run -- migrate         # Apply pending migrations (if any)
-dump-schema                  # Generate db/schema.sql from current state
+sqlx migrate run             # Apply pending migrations
+./bin/dump-schema.sh         # Generate db/schema.sql from migrations (fast!)
 
 # Lint and format
 cargo clippy

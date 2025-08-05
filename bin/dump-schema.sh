@@ -1,4 +1,7 @@
-echo "🔍 Generating schema.sql from current database state..."
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "🔍 Generating schema.sql from migration files..."
 
 # Create temporary database
 TEMP_DB="temp_schema_dump.db"
@@ -7,11 +10,11 @@ rm -f "$TEMP_DB"
 # Create database directory
 mkdir -p db
 
-# Create a temporary database and apply migrations
-echo "📁 Creating temporary database with migrations..."
-echo "temp-password" >/tmp/temp_password
-DATABASE_URL="sqlite:$TEMP_DB" lilvault --database "$TEMP_DB" init --name "schema-dump" --password-file /tmp/temp_password >/dev/null 2>&1
-rm -f /tmp/temp_password
+echo "📁 Creating temporary database and applying migrations..."
+
+# Create empty database and apply migrations using sqlx
+DATABASE_URL="sqlite:$TEMP_DB" sqlx database create
+DATABASE_URL="sqlite:$TEMP_DB" sqlx migrate run
 
 # Dump the schema using sqlite3
 echo "📤 Dumping schema..."
@@ -26,7 +29,7 @@ cat >db/schema.sql <<EOF
 -- Database version: (determined by migration files in migrations/)
 --
 -- To regenerate this file, run:
---   nix run .#dump-schema
+--   ./bin/dump-schema.sh
 
 $SCHEMA
 EOF
