@@ -1478,45 +1478,29 @@ async fn main() -> Result<()> {
                             );
 
                             for version_info in &info.versions {
-                                let mut vault_keys = Vec::new();
-                                let mut host_keys = Vec::new();
+                                // Create list of all key names, one per line
+                                let mut key_lines = Vec::new();
 
                                 for key in &version_info.encrypted_for_keys {
-                                    if key.key_type == "vault" {
-                                        vault_keys.push(key.name.as_str());
-                                    } else {
-                                        host_keys.push(key.name.as_str());
-                                    }
+                                    key_lines.push(format!("{} ({})", key.name, key.key_type));
                                 }
 
-                                // Build clean key display
-                                let keys_text = if vault_keys.is_empty() && host_keys.is_empty() {
-                                    "No keys".to_string()
-                                } else {
-                                    let mut parts = Vec::new();
-                                    if !vault_keys.is_empty() {
-                                        parts.push(format!("vault:[{}]", vault_keys.join(", ")));
-                                    }
-                                    if !host_keys.is_empty() {
-                                        parts.push(format!("host:[{}]", host_keys.join(", ")));
-                                    }
-                                    parts.join(" ")
-                                };
-
-                                // Truncate long key lists to fit in table
-                                let display_keys = if keys_text.len() > 40 {
-                                    format!("{}...", &keys_text[..37])
-                                } else {
-                                    keys_text
-                                };
-
+                                // Print first line with all columns
                                 println!(
                                     "│ {:>7} │ {:<19} │ {:>9} │ {:<43} │",
                                     version_info.version,
                                     version_info.created_at.format("%Y-%m-%d %H:%M:%S"),
                                     version_info.encrypted_for_keys.len(),
-                                    display_keys
+                                    key_lines.first().unwrap_or(&String::new())
                                 );
+
+                                // Print additional lines for remaining keys
+                                for key_line in key_lines.iter().skip(1) {
+                                    println!(
+                                        "│ {:>7} │ {:<19} │ {:>9} │ {:<43} │",
+                                        "", "", "", key_line
+                                    );
+                                }
                             }
                             println!(
                                 "└─────────┴─────────────────────┴───────────┴─────────────────────────────────────────────┘"
