@@ -22,8 +22,6 @@ pub async fn handle_secrets(db: &Database, command: SecretCommands) -> Result<()
 
         SecretCommands::List { key } => handle_list(db, key).await,
 
-        SecretCommands::Versions { name, key } => handle_versions(db, name, key).await,
-
         SecretCommands::Delete { name } => handle_delete(db, name).await,
 
         SecretCommands::Generate {
@@ -43,13 +41,13 @@ pub async fn handle_secrets(db: &Database, command: SecretCommands) -> Result<()
         } => handle_edit(db, name, key, password_file.as_deref()).await,
 
         SecretCommands::Share {
-            name,
-            hosts,
+            host,
+            secrets,
             vault_key,
             password_file,
-        } => handle_share(db, name, hosts, vault_key, password_file.as_deref()).await,
+        } => handle_share(db, host, secrets, vault_key, password_file.as_deref()).await,
 
-        SecretCommands::Unshare { name, hosts } => handle_unshare(db, name, hosts).await,
+        SecretCommands::Unshare { host, secrets } => handle_unshare(db, host, secrets).await,
     }
 }
 
@@ -472,88 +470,6 @@ async fn handle_list(db: &Database, key: Option<String>) -> Result<()> {
                 description,
                 secret.created_at.format("%Y-%m-%d %H:%M:%S UTC"),
                 latest_version.unwrap_or(0)
-            );
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_versions(db: &Database, name: String, key: Option<String>) -> Result<()> {
-    use miette::IntoDiagnostic;
-    use tracing::{error, info};
-
-    if let Some(key_fingerprint) = key {
-        // Show versions accessible by specific key
-        let versions = db
-            .get_secret_versions_for_key(&name, &key_fingerprint)
-            .await
-            .into_diagnostic()?;
-        if versions.is_empty() {
-            info!("No versions of secret '{name}' accessible by key: {key_fingerprint}");
-            return Ok(());
-        }
-
-        info!("Versions of secret '{name}' accessible by key {key_fingerprint}:");
-        for version in versions {
-            if let Some(entry) = db
-                .get_secret_storage_for_key(&name, version, &key_fingerprint)
-                .await
-                .into_diagnostic()?
-            {
-                info!(
-                    "  Version {} - Created: {}",
-                    version,
-                    entry.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-                );
-            }
-        }
-    } else {
-        // Show all versions regardless of key
-        let all_entries = db.get_secret_storage(&name, 1).await.into_diagnostic()?; // Get version 1 first to check if secret exists
-        if all_entries.is_empty() {
-            // Try to get any version to see if secret exists
-            if db.get_secret(&name).await.into_diagnostic()?.is_none() {
-                error!("Secret '{name}' not found");
-                std::process::exit(1);
-            }
-        }
-
-        // Get all versions by finding the max version
-        let mut version = 1i64;
-        let mut found_versions = Vec::new();
-
-        loop {
-            let entries = db
-                .get_secret_storage(&name, version)
-                .await
-                .into_diagnostic()?;
-            if entries.is_empty() {
-                break;
-            }
-
-            // Get creation time from first entry
-            let created_at = entries[0].created_at;
-            let key_count = entries.len();
-            found_versions.push((version, created_at, key_count));
-            version += 1;
-        }
-
-        if found_versions.is_empty() {
-            info!("No versions found for secret '{name}'");
-            return Ok(());
-        }
-
-        info!("Versions of secret '{name}':");
-        info!("{:<8} {:<25} Keys", "Version", "Created");
-        info!("{}", "-".repeat(50));
-
-        for (ver, created, key_count) in found_versions {
-            info!(
-                "{:<8} {:<25} {}",
-                ver,
-                created.format("%Y-%m-%d %H:%M:%S UTC"),
-                key_count
             );
         }
     }
@@ -1049,8 +965,8 @@ async fn handle_edit(
 
 async fn handle_share(
     db: &Database,
-    name: String,
-    hosts: String,
+    host: String,
+    secret_names: Vec<String>,
     vault_key: Option<String>,
     password_file: Option<&std::path::Path>,
 ) -> Result<()> {
@@ -1062,36 +978,21 @@ async fn handle_share(
     };
     use lilvault::db::models::{SecretKey, SecretStorage};
     use miette::IntoDiagnostic;
-    use tracing::{error, info};
+    use tracing::{error, info, warn};
 
-    // Check if secret exists
-    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
-        error!("Secret '{name}' not found");
+    if secret_names.is_empty() {
+        error!("No secrets specified");
         std::process::exit(1);
     }
 
-    // Parse hostnames
-    let hostnames: Vec<&str> = hosts.split(',').map(|h| h.trim()).collect();
-    if hostnames.is_empty() {
-        error!("No hosts specified");
-        std::process::exit(1);
-    }
-
-    // Validate that all hostnames exist as host keys
-    let mut host_keys = Vec::new();
-    for hostname in &hostnames {
-        match db
-            .get_host_key_by_hostname(hostname)
-            .await
-            .into_diagnostic()?
-        {
-            Some(key) => host_keys.push(key),
-            None => {
-                error!("Host key not found for hostname: {hostname}");
-                std::process::exit(1);
-            }
+    // Get the host key
+    let host_key = match db.get_host_key_by_hostname(&host).await.into_diagnostic()? {
+        Some(key) => key,
+        None => {
+            error!("Host key not found for hostname: {host}");
+            std::process::exit(1);
         }
-    }
+    };
 
     // Get vault keys for selection
     let vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
@@ -1116,7 +1017,7 @@ async fn handle_share(
             .collect();
 
         let selection = Select::new()
-            .with_prompt("Select vault key to decrypt secret for sharing")
+            .with_prompt("Select vault key to decrypt secrets for sharing")
             .items(&items)
             .interact()
             .into_diagnostic()?;
@@ -1139,208 +1040,273 @@ async fn handle_share(
     )
     .into_diagnostic()?;
 
-    // Get the latest version of the secret
-    let latest_version = match db
-        .get_latest_secret_version(&name)
-        .await
-        .into_diagnostic()?
-    {
-        Some(version) => version,
-        None => {
-            error!("No versions found for secret '{name}'");
-            std::process::exit(1);
-        }
-    };
+    let mut shared_count = 0;
+    let mut failed_secrets = Vec::new();
 
-    // Get encrypted data for the vault key
-    let storage = db
-        .get_secret_storage_for_key(&name, latest_version, &selected_vault_key.fingerprint)
-        .await
-        .into_diagnostic()?;
-
-    let encrypted_data = match storage {
-        Some(s) => s.encrypted_data,
-        None => {
-            error!("Secret '{name}' not accessible with this vault key");
-            std::process::exit(1);
-        }
-    };
-
-    // Decrypt the secret
-    let decrypted_data = decrypt_secret_with_vault_key(
-        &encrypted_data,
-        selected_vault_key.encrypted_private_key.as_ref().unwrap(),
-        &password,
-    )
-    .into_diagnostic()?;
-
-    // Get the next version number for this secret
-    let new_version = db.get_next_secret_version(&name).await.into_diagnostic()?;
-
-    // Get all current keys that the secret is encrypted for
-    let current_vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
-
-    // Get all keys that this secret is currently encrypted for
-    let secret_key_info = db.get_secret_keys(&name).await.into_diagnostic()?;
-    let current_host_keys: Vec<_> = {
-        let mut host_keys = Vec::new();
-        for key_info in &secret_key_info {
-            if key_info.key_type == "host" {
-                if let Some(key) = db.get_key(&key_info.fingerprint).await.into_diagnostic()? {
-                    host_keys.push(key);
-                }
-            }
-        }
-        host_keys
-    };
-
-    // Combine current host keys with new host keys (avoid duplicates)
-    let mut all_host_keys = current_host_keys.clone();
-    for new_host_key in &host_keys {
-        if !all_host_keys
-            .iter()
-            .any(|existing| existing.fingerprint == new_host_key.fingerprint)
+    // Process each secret
+    for secret_name in &secret_names {
+        // Check if secret exists
+        if db
+            .get_secret(secret_name)
+            .await
+            .into_diagnostic()?
+            .is_none()
         {
-            all_host_keys.push(new_host_key.clone());
+            warn!("Secret '{secret_name}' not found - skipping");
+            failed_secrets.push(secret_name.clone());
+            continue;
         }
-    }
 
-    // Create recipients for all keys (vault + all host keys)
-    let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
-
-    for key in &current_vault_keys {
-        recipients.push(vault_key_to_recipient(&key.public_key).into_diagnostic()?);
-    }
-
-    for key in &all_host_keys {
-        recipients.push(host_key_to_recipient(&key.public_key).into_diagnostic()?);
-    }
-
-    // Encrypt the secret for all recipients
-    let encrypted_data = encrypt_for_recipients(&decrypted_data, recipients).into_diagnostic()?;
-
-    // Store encrypted copies for each key
-    let mut stored_count = 0;
-
-    // Store for vault keys
-    for key in &current_vault_keys {
-        let storage_entry = SecretStorage::new(
-            name.clone(),
-            new_version,
-            key.fingerprint.clone(),
-            "vault".to_string(),
-            encrypted_data.clone(),
-        );
-        db.insert_secret_storage(&storage_entry)
-            .await
-            .into_diagnostic()?;
-        stored_count += 1;
-    }
-
-    // Store for all host keys (existing + new)
-    for key in &all_host_keys {
-        let storage_entry = SecretStorage::new(
-            name.clone(),
-            new_version,
-            key.fingerprint.clone(),
-            "host".to_string(),
-            encrypted_data.clone(),
-        );
-        db.insert_secret_storage(&storage_entry)
-            .await
-            .into_diagnostic()?;
-        stored_count += 1;
-    }
-
-    // Update secrets_keys table with new host keys
-    for host_key in &host_keys {
-        // Check if relationship already exists
-        if !db
-            .is_secret_encrypted_for_key_new(&name, &host_key.fingerprint)
+        // Get the latest version of the secret
+        let latest_version = match db
+            .get_latest_secret_version(secret_name)
             .await
             .into_diagnostic()?
         {
-            let now = Utc::now();
-            let secret_key = SecretKey {
-                secret_name: name.clone(),
-                key_fingerprint: host_key.fingerprint.clone(),
-                key_type: "host".to_string(),
-                created_at: now,
-                updated_at: now,
-            };
-            db.insert_secret_key(&secret_key).await.into_diagnostic()?;
+            Some(version) => version,
+            None => {
+                warn!("No versions found for secret '{secret_name}' - skipping");
+                failed_secrets.push(secret_name.clone());
+                continue;
+            }
+        };
+
+        // Get encrypted data for the vault key
+        let storage = db
+            .get_secret_storage_for_key(
+                secret_name,
+                latest_version,
+                &selected_vault_key.fingerprint,
+            )
+            .await
+            .into_diagnostic()?;
+
+        let encrypted_data = match storage {
+            Some(s) => s.encrypted_data,
+            None => {
+                warn!("Secret '{secret_name}' not accessible with this vault key - skipping");
+                failed_secrets.push(secret_name.clone());
+                continue;
+            }
+        };
+
+        // Decrypt the secret
+        let decrypted_data = match decrypt_secret_with_vault_key(
+            &encrypted_data,
+            selected_vault_key.encrypted_private_key.as_ref().unwrap(),
+            &password,
+        ) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!("Failed to decrypt secret '{secret_name}': {e} - skipping");
+                failed_secrets.push(secret_name.clone());
+                continue;
+            }
+        };
+
+        // Check if already shared with this host
+        if db
+            .is_secret_encrypted_for_key_new(secret_name, &host_key.fingerprint)
+            .await
+            .into_diagnostic()?
+        {
+            info!("Secret '{secret_name}' already shared with host '{host}' - skipping");
+            continue;
+        }
+
+        // Get the next version number for this secret
+        let new_version = db
+            .get_next_secret_version(secret_name)
+            .await
+            .into_diagnostic()?;
+
+        // Get all current keys that the secret is encrypted for
+        let current_vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
+
+        // Get all keys that this secret is currently encrypted for
+        let secret_key_info = db.get_secret_keys(secret_name).await.into_diagnostic()?;
+        let current_host_keys: Vec<_> = {
+            let mut host_keys = Vec::new();
+            for key_info in &secret_key_info {
+                if key_info.key_type == "host" {
+                    if let Some(key) = db.get_key(&key_info.fingerprint).await.into_diagnostic()? {
+                        host_keys.push(key);
+                    }
+                }
+            }
+            host_keys
+        };
+
+        // Add the new host key to existing host keys
+        let mut all_host_keys = current_host_keys;
+        all_host_keys.push(host_key.clone());
+
+        // Create recipients for all keys (vault + all host keys)
+        let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+
+        for key in &current_vault_keys {
+            recipients.push(vault_key_to_recipient(&key.public_key).into_diagnostic()?);
+        }
+
+        for key in &all_host_keys {
+            recipients.push(host_key_to_recipient(&key.public_key).into_diagnostic()?);
+        }
+
+        // Encrypt the secret for all recipients
+        let encrypted_data =
+            encrypt_for_recipients(&decrypted_data, recipients).into_diagnostic()?;
+
+        // Store encrypted copies for each key
+        // Store for vault keys
+        for key in &current_vault_keys {
+            let storage_entry = SecretStorage::new(
+                secret_name.clone(),
+                new_version,
+                key.fingerprint.clone(),
+                "vault".to_string(),
+                encrypted_data.clone(),
+            );
+            db.insert_secret_storage(&storage_entry)
+                .await
+                .into_diagnostic()?;
+        }
+
+        // Store for all host keys (existing + new)
+        for key in &all_host_keys {
+            let storage_entry = SecretStorage::new(
+                secret_name.clone(),
+                new_version,
+                key.fingerprint.clone(),
+                "host".to_string(),
+                encrypted_data.clone(),
+            );
+            db.insert_secret_storage(&storage_entry)
+                .await
+                .into_diagnostic()?;
+        }
+
+        // Update secrets_keys table with the new host key
+        let now = Utc::now();
+        let secret_key = SecretKey {
+            secret_name: secret_name.clone(),
+            key_fingerprint: host_key.fingerprint.clone(),
+            key_type: "host".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        db.insert_secret_key(&secret_key).await.into_diagnostic()?;
+
+        // Log audit entry
+        db.log_audit(
+            "SHARE_SECRET",
+            secret_name,
+            Some(&format!(
+                "Shared secret version {new_version} with host: {host}"
+            )),
+            Some(new_version),
+            true,
+            None,
+        )
+        .await
+        .into_diagnostic()?;
+
+        shared_count += 1;
+    }
+
+    // Report results
+    if shared_count > 0 {
+        info!("✓ Shared {shared_count} secrets with host '{host}'");
+        for secret_name in &secret_names {
+            if !failed_secrets.contains(secret_name) {
+                info!("  - {secret_name}");
+            }
         }
     }
 
-    // Log audit entry
-    let host_list = hostnames.join(", ");
-    db.log_audit(
-        "SHARE_SECRET",
-        &name,
-        Some(&format!(
-            "Shared secret version {new_version} with hosts: {host_list}"
-        )),
-        Some(new_version),
-        true,
-        None,
-    )
-    .await
-    .into_diagnostic()?;
+    if !failed_secrets.is_empty() {
+        warn!("Failed to share {} secrets:", failed_secrets.len());
+        for secret_name in &failed_secrets {
+            warn!("  - {secret_name}");
+        }
+    }
 
-    info!("✓ Secret '{}' shared successfully!", name);
-    info!("  New version: {}", new_version);
-    info!("  Shared with hosts: {}", host_list);
-    info!("  Total keys with access: {}", stored_count);
+    if shared_count == 0 {
+        error!("No secrets were shared successfully");
+        std::process::exit(1);
+    }
 
     Ok(())
 }
 
-async fn handle_unshare(db: &Database, name: String, hosts: String) -> Result<()> {
+async fn handle_unshare(db: &Database, host: String, secret_names: Vec<String>) -> Result<()> {
     use miette::IntoDiagnostic;
-    use tracing::{error, warn};
+    use tracing::{error, info, warn};
 
-    // Check if secret exists
-    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
-        error!("Secret '{name}' not found");
+    if secret_names.is_empty() {
+        error!("No secrets specified");
         std::process::exit(1);
     }
 
-    // Parse hostnames
-    let hostnames: Vec<&str> = hosts.split(',').map(|h| h.trim()).collect();
-    if hostnames.is_empty() {
-        error!("No hosts specified");
-        std::process::exit(1);
-    }
-
-    // Get host keys to remove
-    let mut host_keys_to_remove = Vec::new();
-    for hostname in &hostnames {
-        match db
-            .get_host_key_by_hostname(hostname)
-            .await
-            .into_diagnostic()?
-        {
-            Some(key) => host_keys_to_remove.push(key),
-            None => {
-                warn!("Host key not found for hostname: {hostname}");
-            }
+    // Get the host key
+    let host_key = match db.get_host_key_by_hostname(&host).await.into_diagnostic()? {
+        Some(key) => key,
+        None => {
+            error!("Host key not found for hostname: {host}");
+            std::process::exit(1);
         }
-    }
+    };
 
-    if host_keys_to_remove.is_empty() {
-        error!("No valid host keys found to remove");
-        std::process::exit(1);
-    }
+    let mut unshared_count = 0;
+    let mut failed_secrets = Vec::new();
+    let mut not_shared_secrets = Vec::new();
 
-    // Remove secret-key relationships
-    let mut removed_count = 0;
-    for host_key in &host_keys_to_remove {
+    // Process each secret
+    for secret_name in &secret_names {
+        // Check if secret exists
         if db
-            .remove_secret_key(&name, &host_key.fingerprint)
+            .get_secret(secret_name)
+            .await
+            .into_diagnostic()?
+            .is_none()
+        {
+            warn!("Secret '{secret_name}' not found - skipping");
+            failed_secrets.push(secret_name.clone());
+            continue;
+        }
+
+        // Check if secret is currently shared with this host
+        if !db
+            .is_secret_encrypted_for_key_new(secret_name, &host_key.fingerprint)
             .await
             .into_diagnostic()?
         {
-            removed_count += 1;
+            info!("Secret '{secret_name}' not shared with host '{host}' - skipping");
+            not_shared_secrets.push(secret_name.clone());
+            continue;
+        }
+
+        // Remove secret-key relationship
+        if db
+            .remove_secret_key(secret_name, &host_key.fingerprint)
+            .await
+            .into_diagnostic()?
+        {
+            // Log audit entry
+            db.log_audit(
+                "UNSHARE_SECRET",
+                secret_name,
+                Some(&format!("Removed access for host: {host}")),
+                None,
+                true,
+                None,
+            )
+            .await
+            .into_diagnostic()?;
+
+            unshared_count += 1;
+        } else {
+            warn!("Failed to remove access for secret '{secret_name}' - skipping");
+            failed_secrets.push(secret_name.clone());
         }
     }
 
@@ -1349,33 +1315,38 @@ async fn handle_unshare(db: &Database, name: String, hosts: String) -> Result<()
     // 2. Future versions won't include these hosts
     // 3. The secrets_keys table controls access, not secret_storage
 
-    if removed_count > 0 {
-        use tracing::info;
-
-        // Log audit entry
-        let host_names: Vec<String> = host_keys_to_remove.iter().map(|k| k.name.clone()).collect();
-        db.log_audit(
-            "UNSHARE_SECRET",
-            &name,
-            Some(&format!(
-                "Removed access for {} hosts: {}",
-                removed_count,
-                host_names.join(", ")
-            )),
-            None,
-            true,
-            None,
-        )
-        .await
-        .into_diagnostic()?;
-
-        info!("✓ Secret '{name}' unshared from {removed_count} hosts");
-        for host_key in &host_keys_to_remove {
-            info!("  - {}", host_key.name);
+    // Report results
+    if unshared_count > 0 {
+        info!("✓ Unshared {unshared_count} secrets from host '{host}'");
+        for secret_name in &secret_names {
+            if !failed_secrets.contains(secret_name) && !not_shared_secrets.contains(secret_name) {
+                info!("  - {secret_name}");
+            }
         }
-    } else {
-        use tracing::info;
-        info!("No changes made - secret was not shared with specified hosts");
+    }
+
+    if !not_shared_secrets.is_empty() {
+        info!("Secrets not previously shared with '{host}':");
+        for secret_name in &not_shared_secrets {
+            info!("  - {secret_name}");
+        }
+    }
+
+    if !failed_secrets.is_empty() {
+        warn!("Failed to process {} secrets:", failed_secrets.len());
+        for secret_name in &failed_secrets {
+            warn!("  - {secret_name}");
+        }
+    }
+
+    if unshared_count == 0
+        && failed_secrets.is_empty()
+        && not_shared_secrets.len() == secret_names.len()
+    {
+        info!("No changes made - no secrets were shared with host '{host}'");
+    } else if unshared_count == 0 {
+        error!("No secrets were unshared successfully");
+        std::process::exit(1);
     }
 
     Ok(())

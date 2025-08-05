@@ -62,6 +62,11 @@ pub async fn handle_keys(db: &Database, command: KeyCommands) -> Result<()> {
         KeyCommands::List { key_type } => handle_list(db, key_type).await,
 
         KeyCommands::Remove { identifier } => handle_remove(db, identifier).await,
+
+        KeyCommands::Rename {
+            identifier,
+            new_name,
+        } => handle_rename(db, identifier, new_name).await,
     }
 }
 
@@ -437,6 +442,92 @@ async fn handle_remove(db: &Database, identifier: String) -> Result<()> {
         info!("✓ {} key removed: {}", key_type, identifier);
     } else {
         error!("Key not found: {}", identifier);
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+async fn handle_rename(db: &Database, identifier: String, new_name: String) -> Result<()> {
+    // First, find the key by identifier (fingerprint, vault key name, or hostname for host keys)
+    let key = if let Some(key) = db.get_key(&identifier).await.into_diagnostic()? {
+        key
+    } else if let Some(key) = db
+        .get_vault_key_by_name(&identifier)
+        .await
+        .into_diagnostic()?
+    {
+        key
+    } else if let Some(key) = db
+        .get_host_key_by_hostname(&identifier)
+        .await
+        .into_diagnostic()?
+    {
+        key
+    } else {
+        error!("Key not found: {}", identifier);
+        std::process::exit(1);
+    };
+
+    // Check if the new name would conflict with existing keys
+    // For host keys, check if hostname already exists
+    if key.key_type == "host" {
+        if let Some(_existing) = db
+            .get_host_key_by_hostname(&new_name)
+            .await
+            .into_diagnostic()?
+        {
+            error!("Host key with hostname '{}' already exists", new_name);
+            std::process::exit(1);
+        }
+    }
+
+    // For vault keys, check if name already exists
+    if key.key_type == "vault" {
+        let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+        if vault_keys
+            .iter()
+            .any(|k| k.name == new_name && k.fingerprint != key.fingerprint)
+        {
+            error!("Vault key with name '{}' already exists", new_name);
+            std::process::exit(1);
+        }
+    }
+
+    // Perform the rename
+    let renamed = db
+        .rename_key(&key.fingerprint, &new_name)
+        .await
+        .into_diagnostic()?;
+
+    if renamed {
+        let operation = if key.key_type == "vault" {
+            "RENAME_VAULT_KEY"
+        } else {
+            "RENAME_HOST_KEY"
+        };
+
+        // Log audit entry
+        db.log_audit(
+            operation,
+            &key.fingerprint,
+            Some(&format!(
+                "{} key renamed from '{}' to '{}'",
+                key.key_type, key.name, new_name
+            )),
+            None,
+            true,
+            None,
+        )
+        .await
+        .into_diagnostic()?;
+
+        info!(
+            "✓ {} key renamed: '{}' → '{}'",
+            key.key_type, key.name, new_name
+        );
+    } else {
+        error!("Failed to rename key: {}", identifier);
         std::process::exit(1);
     }
 

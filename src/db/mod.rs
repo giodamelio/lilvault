@@ -99,6 +99,11 @@ impl Database {
         keys::get_vault_key(&self.pool, fingerprint).await
     }
 
+    /// Get vault key by name
+    pub async fn get_vault_key_by_name(&self, name: &str) -> Result<Option<Key>> {
+        keys::get_vault_key_by_name(&self.pool, name).await
+    }
+
     /// Get host key by hostname
     pub async fn get_host_key_by_hostname(&self, hostname: &str) -> Result<Option<Key>> {
         keys::get_host_key_by_hostname(&self.pool, hostname).await
@@ -127,6 +132,11 @@ impl Database {
     /// Remove host key by fingerprint
     pub async fn remove_host_key_by_fingerprint(&self, fingerprint: &str) -> Result<bool> {
         keys::remove_host_key_by_fingerprint(&self.pool, fingerprint).await
+    }
+
+    /// Rename a key
+    pub async fn rename_key(&self, fingerprint: &str, new_name: &str) -> Result<bool> {
+        keys::rename_key(&self.pool, fingerprint, new_name).await
     }
 
     // Secret Operations

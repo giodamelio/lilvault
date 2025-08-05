@@ -110,6 +110,14 @@ pub enum KeyCommands {
         /// Key fingerprint or hostname to remove
         identifier: String,
     },
+
+    /// Rename a key
+    Rename {
+        /// Key fingerprint, vault key name, or hostname to rename
+        identifier: String,
+        /// New name for the key
+        new_name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -150,15 +158,6 @@ pub enum SecretCommands {
     /// List secrets
     List {
         /// Only show secrets accessible by this key
-        #[arg(long)]
-        key: Option<String>,
-    },
-
-    /// Show versions of a secret
-    Versions {
-        /// Name of the secret
-        name: String,
-        /// Only show versions accessible by this key
         #[arg(long)]
         key: Option<String>,
     },
@@ -205,13 +204,12 @@ pub enum SecretCommands {
         password_file: Option<PathBuf>,
     },
 
-    /// Share a secret with additional hosts
+    /// Share secrets with a host
     Share {
-        /// Name of the secret to share
-        name: String,
-        /// Hosts to share with (comma-separated hostnames)
-        #[arg(long)]
-        hosts: String,
+        /// Hostname to share secrets with
+        host: String,
+        /// Names of the secrets to share
+        secrets: Vec<String>,
         /// Vault key fingerprint to use for decryption
         #[arg(long)]
         vault_key: Option<String>,
@@ -220,13 +218,12 @@ pub enum SecretCommands {
         password_file: Option<PathBuf>,
     },
 
-    /// Unshare a secret from hosts
+    /// Unshare secrets from a host
     Unshare {
-        /// Name of the secret to unshare
-        name: String,
-        /// Hosts to unshare from (comma-separated hostnames)
-        #[arg(long)]
-        hosts: String,
+        /// Hostname to unshare secrets from
+        host: String,
+        /// Names of the secrets to unshare
+        secrets: Vec<String>,
     },
 }
 
@@ -271,5 +268,23 @@ pub enum ExportCommands {
         /// Output file (stdout if not specified)
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+    },
+
+    /// Export secrets as encrypted systemd credentials
+    SystemdCreds {
+        /// Target directory for credential files
+        directory: std::path::PathBuf,
+        /// Encrypt for system-wide credentials
+        #[arg(long)]
+        system: bool,
+        /// Encrypt for user-scoped credentials (default)
+        #[arg(long)]
+        user: bool,
+        /// Overwrite existing credential files
+        #[arg(long)]
+        force: bool,
+        /// Host key fingerprint or hostname to export secrets for (defaults to current hostname)
+        #[arg(long)]
+        key: Option<String>,
     },
 }

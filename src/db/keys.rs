@@ -60,6 +60,17 @@ pub async fn get_vault_key(pool: &SqlitePool, fingerprint: &str) -> Result<Optio
     Ok(key)
 }
 
+pub async fn get_vault_key_by_name(pool: &SqlitePool, name: &str) -> Result<Option<Key>> {
+    let key = sqlx::query_as::<_, Key>(&format!(
+        "{SELECT_KEY_FIELDS} WHERE name = ? AND key_type = 'vault'"
+    ))
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(key)
+}
+
 pub async fn get_host_key_by_hostname(pool: &SqlitePool, hostname: &str) -> Result<Option<Key>> {
     let key = sqlx::query_as::<_, Key>(&format!(
         "{SELECT_KEY_FIELDS} WHERE name = ? AND key_type = 'host'"
@@ -127,4 +138,16 @@ pub async fn is_initialized(pool: &SqlitePool) -> Result<bool> {
         .await?;
 
     Ok(count.0 > 0)
+}
+
+pub async fn rename_key(pool: &SqlitePool, fingerprint: &str, new_name: &str) -> Result<bool> {
+    let result = sqlx::query(
+        "UPDATE keys SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE fingerprint = ?",
+    )
+    .bind(new_name)
+    .bind(fingerprint)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }

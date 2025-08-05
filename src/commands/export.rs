@@ -1,9 +1,10 @@
 use lilvault::cli::ExportCommands;
 use lilvault::db::Database;
 use miette::{IntoDiagnostic, Result};
-use std::fs::File;
+use std::fs::{File, create_dir_all};
 use std::io::Write;
-use tracing::info;
+use std::path::PathBuf;
+use tracing::{info, warn};
 
 /// Handle export commands
 pub async fn handle_export(db: &Database, command: ExportCommands) -> Result<()> {
@@ -11,6 +12,14 @@ pub async fn handle_export(db: &Database, command: ExportCommands) -> Result<()>
         ExportCommands::Dot { output } => handle_dot_export(db, output).await,
 
         ExportCommands::Csv { output } => handle_csv_export(db, output).await,
+
+        ExportCommands::SystemdCreds {
+            directory,
+            system,
+            user,
+            force,
+            key,
+        } => handle_systemd_creds_export(db, directory, system, user, force, key).await,
     }
 }
 
@@ -169,4 +178,219 @@ async fn handle_csv_export(db: &Database, output: Option<std::path::PathBuf>) ->
     }
 
     Ok(())
+}
+
+async fn handle_systemd_creds_export(
+    db: &Database,
+    directory: PathBuf,
+    system: bool,
+    _user: bool,
+    force: bool,
+    key: Option<String>,
+) -> Result<()> {
+    use lilvault::crypto::decrypt_with_ssh_identity;
+
+    // First, determine which host we're exporting for
+    let target_host_key = match key.clone() {
+        Some(identifier) => {
+            // Try to find the host key by identifier
+            if let Some(key) = db.get_key(&identifier).await.into_diagnostic()? {
+                if key.key_type == "host" {
+                    key
+                } else {
+                    return Err(miette::miette!("Key '{}' is not a host key", identifier));
+                }
+            } else if let Some(key) = db
+                .get_host_key_by_hostname(&identifier)
+                .await
+                .into_diagnostic()?
+            {
+                key
+            } else {
+                return Err(miette::miette!("Host key not found: {}", identifier));
+            }
+        }
+        None => {
+            // Get current hostname and find corresponding host key
+            let hostname = std::process::Command::new("hostname")
+                .output()
+                .into_diagnostic()?
+                .stdout;
+            let hostname = String::from_utf8(hostname)
+                .into_diagnostic()?
+                .trim()
+                .to_string();
+
+            db.get_host_key_by_hostname(&hostname)
+                .await
+                .into_diagnostic()?
+                .ok_or_else(|| {
+                    miette::miette!("No host key found for hostname '{}'. Add a host key first with: lilvault keys add-host {} <ssh-public-key-path>", hostname, hostname)
+                })?
+        }
+    };
+
+    info!("Exporting secrets for host '{}'", target_host_key.name);
+
+    // Get secrets accessible by this host key
+    let secret_names = db
+        .get_secrets_for_key(&target_host_key.fingerprint)
+        .await
+        .into_diagnostic()?;
+
+    if secret_names.is_empty() {
+        info!("No secrets accessible by host '{}'", target_host_key.name);
+        return Ok(());
+    }
+
+    // Load the SSH private key for the host
+    let ssh_identity = load_host_ssh_identity(&target_host_key.name)?;
+
+    info!("Using SSH private key for host '{}'", target_host_key.name);
+
+    // Ensure directory exists
+    create_dir_all(&directory).into_diagnostic()?;
+
+    let mut exported_count = 0;
+    let mut skipped_count = 0;
+
+    for secret_name in secret_names {
+        let cred_file = directory.join(format!("{secret_name}.cred"));
+
+        // Check if file exists and handle force flag
+        if cred_file.exists() && !force {
+            warn!(
+                "Skipping {}: credential file already exists (use --force to overwrite)",
+                secret_name
+            );
+            skipped_count += 1;
+            continue;
+        }
+
+        // Get the latest version of the secret
+        let latest_version = db
+            .get_latest_secret_version(&secret_name)
+            .await
+            .into_diagnostic()?
+            .ok_or_else(|| miette::miette!("No versions found for secret '{}'", secret_name))?;
+
+        // Get the encrypted secret data for the host key
+        let secret_storage = db
+            .get_secret_storage_for_key(&secret_name, latest_version, &target_host_key.fingerprint)
+            .await
+            .into_diagnostic()?
+            .ok_or_else(|| {
+                miette::miette!(
+                    "Secret '{}' not accessible by host key {}",
+                    secret_name,
+                    target_host_key.fingerprint
+                )
+            })?;
+
+        // Decrypt the secret data using the SSH identity
+        let decrypted_data =
+            decrypt_with_ssh_identity(&secret_storage.encrypted_data, &ssh_identity)
+                .into_diagnostic()?;
+
+        // Create a temporary file with the decrypted (plaintext) data
+        let temp_file = std::env::temp_dir().join(format!("lilvault_temp_{secret_name}"));
+        std::fs::write(&temp_file, &decrypted_data).into_diagnostic()?;
+
+        // Build systemd-creds command
+        let mut cmd = std::process::Command::new("systemd-creds");
+        cmd.arg("encrypt")
+            .arg("--with-key=host")
+            .arg(&temp_file)
+            .arg(&cred_file);
+
+        // Determine if we should use system or user credentials
+        let use_system = if system {
+            // Explicitly requested system credentials
+            true
+        } else if is_running_as_root() {
+            // If running as root and no explicit --user flag, default to system
+            !_user // Only use system if --user wasn't explicitly set
+        } else {
+            // Non-root users default to user credentials
+            false
+        };
+
+        if !use_system {
+            // User credentials
+            cmd.arg("--user");
+        }
+        // System credentials are the default behavior (no extra flag needed)
+
+        // Execute the command
+        let output = cmd.output().into_diagnostic()?;
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&temp_file);
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(miette::miette!(
+                "Failed to encrypt credential '{}': {}",
+                secret_name,
+                stderr
+            ));
+        }
+
+        info!("Exported {} to {}", secret_name, cred_file.display());
+        exported_count += 1;
+    }
+
+    info!(
+        "SystemD credentials export complete: {} exported, {} skipped",
+        exported_count, skipped_count
+    );
+
+    Ok(())
+}
+
+/// Load SSH private key for the host
+fn load_host_ssh_identity(hostname: &str) -> Result<age::ssh::Identity> {
+    use std::fs;
+
+    // Try common SSH private key locations for hosts
+    let potential_paths = [
+        "/etc/ssh/ssh_host_ed25519_key".to_string(),
+        "/etc/ssh/ssh_host_rsa_key".to_string(),
+        "/etc/ssh/ssh_host_ecdsa_key".to_string(),
+        format!("/home/{hostname}/.ssh/id_ed25519"),
+        format!("/home/{hostname}/.ssh/id_rsa"),
+        format!("/home/{hostname}/.ssh/id_ecdsa"),
+        "/root/.ssh/id_ed25519".to_string(),
+        "/root/.ssh/id_rsa".to_string(),
+        "/root/.ssh/id_ecdsa".to_string(),
+    ];
+
+    for path_str in &potential_paths {
+        if let Ok(key_data) = fs::read(path_str) {
+            // Try to create SSH identity from the key data
+            let cursor = std::io::Cursor::new(key_data);
+            if let Ok(identity) = age::ssh::Identity::from_buffer(cursor, None) {
+                info!("Loaded SSH private key from: {}", path_str);
+                return Ok(identity);
+            }
+        }
+    }
+
+    Err(miette::miette!(
+        "Could not find SSH private key for host '{}'. Tried paths: {}",
+        hostname,
+        potential_paths.join(", ")
+    ))
+}
+
+/// Check if the current process is running as root
+fn is_running_as_root() -> bool {
+    // Check if the USER environment variable is root, or if we're running with UID 0
+    std::env::var("USER").unwrap_or_default() == "root"
+        || std::env::var("USERNAME").unwrap_or_default() == "root"
+        || std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim() == "0")
+            .unwrap_or(false)
 }

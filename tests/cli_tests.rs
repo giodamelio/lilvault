@@ -635,15 +635,13 @@ fn test_secret_versions() {
         .assert()
         .success();
 
-    // Check versions
+    // Check versions using info command
     lilvault_cmd(vault_db.to_str().unwrap())
-        .args(["secret", "versions", "versioned-secret"])
+        .args(["secret", "info", "versioned-secret"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "Versions of secret 'versioned-secret'",
-        ))
-        .stdout(predicate::str::contains("Version"))
+        .stdout(predicate::str::contains("versioned-secret"))
+        .stdout(predicate::str::contains("Version History"))
         .stdout(predicate::str::contains("1"))
         .stdout(predicate::str::contains("2"));
 }
