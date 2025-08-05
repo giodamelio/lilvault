@@ -13,7 +13,20 @@ use lilvault::db::{
 use miette::{IntoDiagnostic, Result};
 use std::fs;
 use std::path::Path;
+use tabled::{Table, Tabled};
 use tracing::{error, info, warn};
+
+#[derive(Tabled)]
+struct KeyTableRow {
+    #[tabled(rename = "Fingerprint")]
+    fingerprint: String,
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Type")]
+    key_type: String,
+    #[tabled(rename = "Created")]
+    created: String,
+}
 
 /// Handle keys commands
 pub async fn handle_keys(db: &Database, command: KeyCommands) -> Result<()> {
@@ -387,19 +400,18 @@ async fn handle_list(db: &Database, key_type: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    info!("Keys:");
-    info!("{:<16} {:<20} {:<8} Created", "Fingerprint", "Name", "Type");
-    info!("{}", "-".repeat(70));
+    let table_data: Vec<KeyTableRow> = keys
+        .into_iter()
+        .map(|key| KeyTableRow {
+            fingerprint: key.fingerprint,
+            name: key.name,
+            key_type: key.key_type,
+            created: key.created_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        })
+        .collect();
 
-    for key in keys {
-        info!(
-            "{:<16} {:<20} {:<8} {}",
-            key.fingerprint,
-            key.name,
-            key.key_type,
-            key.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-        );
-    }
+    let table = Table::new(table_data);
+    println!("{table}");
 
     Ok(())
 }
