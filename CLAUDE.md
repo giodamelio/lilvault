@@ -18,6 +18,7 @@ LilVault is a single-file SQLite-based secrets manager that allows you to safely
 ## Development Principles
 
 - Never modify existing migrations
+- Don't edit migrations that have already been used. Add new ones to make changes to the db schema.
 
 ## Architecture
 

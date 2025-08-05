@@ -302,4 +302,22 @@ pub struct SecretInfo {
     pub total_versions: i64,
     pub latest_version: Option<i64>,
     pub versions: Vec<SecretVersionInfo>,
+    pub recipients: Vec<SecretKeyInfo>, // Keys that this secret is encrypted for
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct SecretHostAccess {
+    pub secret_name: String,
+    pub host_key_fingerprint: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct SecretKey {
+    pub secret_name: String,
+    pub key_fingerprint: String,
+    pub key_type: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }

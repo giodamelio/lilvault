@@ -10,7 +10,7 @@ use lilvault::crypto::{
 };
 use lilvault::db::{
     Database,
-    models::{Key, Secret, SecretStorage},
+    models::{Key, Secret, SecretKey, SecretStorage},
 };
 use miette::{IntoDiagnostic, Result};
 use std::fs;
@@ -782,38 +782,12 @@ async fn main() -> Result<()> {
                         ));
                     }
 
-                    // Add specified host keys
-                    if let Some(host_list) = hosts {
-                        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
-                        for hostname in hostnames {
-                            if let Some(host_key) = db
-                                .get_host_key_by_hostname(hostname)
-                                .await
-                                .into_diagnostic()?
-                            {
-                                let ssh_recipient =
-                                    parse_ssh_public_key(&host_key.public_key).into_diagnostic()?;
-                                target_keys.push((
-                                    host_key.fingerprint.clone(),
-                                    "host".to_string(),
-                                    Box::new(ssh_recipient) as Box<dyn age::Recipient + Send>,
-                                ));
-                            } else {
-                                warn!("Host '{hostname}' not found, skipping");
-                            }
-                        }
-                    } else {
-                        // If no hosts specified, add all host keys
-                        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
-                        for host_key in all_host_keys {
-                            let ssh_recipient =
-                                parse_ssh_public_key(&host_key.public_key).into_diagnostic()?;
-                            target_keys.push((
-                                host_key.fingerprint.clone(),
-                                "host".to_string(),
-                                Box::new(ssh_recipient) as Box<dyn age::Recipient + Send>,
-                            ));
-                        }
+                    // For now, ignore the --hosts parameter and only encrypt for vault keys
+                    // Host access will be managed via separate share/unshare commands
+                    if hosts.is_some() {
+                        warn!(
+                            "--hosts parameter is deprecated. Use 'lilvault secret share' command instead."
+                        );
                     }
 
                     if target_keys.is_empty() {
@@ -864,12 +838,29 @@ async fn main() -> Result<()> {
                         stored_count += 1;
                     }
 
+                    // Store key relationships in secrets_keys table
+                    // First remove any existing key relationships for this secret
+                    db.remove_all_secret_keys(&name).await.into_diagnostic()?;
+
+                    // Then add vault keys to secrets_keys table (only vault keys by default)
+                    for vault_key in &vault_keys {
+                        let now = Utc::now();
+                        let secret_key = SecretKey {
+                            secret_name: name.clone(),
+                            key_fingerprint: vault_key.fingerprint.clone(),
+                            key_type: "vault".to_string(),
+                            created_at: now,
+                            updated_at: now,
+                        };
+                        db.insert_secret_key(&secret_key).await.into_diagnostic()?;
+                    }
+
                     // Log audit entry
                     db.log_audit(
                         "STORE_SECRET",
                         &name,
                         Some(&format!(
-                            "Stored secret version {version} for {stored_count} keys"
+                            "Stored secret version {version} for {stored_count} keys (vault keys only)"
                         )),
                         Some(version),
                         true,

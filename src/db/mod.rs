@@ -524,6 +524,150 @@ impl Database {
         Ok(count.0 > 0)
     }
 
+    /// Insert secret host access entry
+    pub async fn insert_secret_host_access(&self, access: &SecretHostAccess) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO secret_host_access (secret_name, host_key_fingerprint, created_at, updated_at) VALUES (?, ?, ?, ?)"
+        )
+        .bind(&access.secret_name)
+        .bind(&access.host_key_fingerprint)
+        .bind(access.created_at)
+        .bind(access.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get all host keys that can access a secret
+    pub async fn get_secret_host_access(&self, secret_name: &str) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT host_key_fingerprint FROM secret_host_access WHERE secret_name = ? ORDER BY host_key_fingerprint"
+        )
+        .bind(secret_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    /// Get all keys that a secret is encrypted for (from secrets_keys table)
+    pub async fn get_secret_keys(&self, secret_name: &str) -> Result<Vec<SecretKeyInfo>> {
+        let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            r#"
+            SELECT sk.key_fingerprint, sk.key_type, k.name
+            FROM secrets_keys sk
+            LEFT JOIN keys k ON sk.key_fingerprint = k.fingerprint
+            WHERE sk.secret_name = ?
+            ORDER BY sk.key_type, k.name
+            "#,
+        )
+        .bind(secret_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let keys: Vec<SecretKeyInfo> = rows
+            .into_iter()
+            .map(|(fingerprint, key_type, name)| {
+                let display_name =
+                    name.unwrap_or_else(|| format!("Unknown ({})", &fingerprint[..8]));
+                SecretKeyInfo {
+                    fingerprint,
+                    key_type,
+                    name: display_name,
+                }
+            })
+            .collect();
+
+        Ok(keys)
+    }
+
+    /// Insert a secret-key relationship (secret is encrypted for this key)
+    pub async fn insert_secret_key(&self, secret_key: &SecretKey) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO secrets_keys (secret_name, key_fingerprint, key_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(&secret_key.secret_name)
+        .bind(&secret_key.key_fingerprint)
+        .bind(&secret_key.key_type)
+        .bind(secret_key.created_at)
+        .bind(secret_key.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Remove all key relationships for a secret
+    pub async fn remove_all_secret_keys(&self, secret_name: &str) -> Result<()> {
+        sqlx::query("DELETE FROM secrets_keys WHERE secret_name = ?")
+            .bind(secret_name)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Remove a specific key relationship for a secret
+    pub async fn remove_secret_key(
+        &self,
+        secret_name: &str,
+        key_fingerprint: &str,
+    ) -> Result<bool> {
+        let result =
+            sqlx::query("DELETE FROM secrets_keys WHERE secret_name = ? AND key_fingerprint = ?")
+                .bind(secret_name)
+                .bind(key_fingerprint)
+                .execute(&self.pool)
+                .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Check if a secret is encrypted for a specific key
+    pub async fn is_secret_encrypted_for_key_new(
+        &self,
+        secret_name: &str,
+        key_fingerprint: &str,
+    ) -> Result<bool> {
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM secrets_keys WHERE secret_name = ? AND key_fingerprint = ?",
+        )
+        .bind(secret_name)
+        .bind(key_fingerprint)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count.0 > 0)
+    }
+
+    /// Remove all host access entries for a secret
+    pub async fn remove_secret_host_access(&self, secret_name: &str) -> Result<()> {
+        sqlx::query("DELETE FROM secret_host_access WHERE secret_name = ?")
+            .bind(secret_name)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Check if a host key can access a secret
+    pub async fn can_host_access_secret(
+        &self,
+        secret_name: &str,
+        host_key_fingerprint: &str,
+    ) -> Result<bool> {
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM secret_host_access WHERE secret_name = ? AND host_key_fingerprint = ?"
+        )
+        .bind(secret_name)
+        .bind(host_key_fingerprint)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count.0 > 0)
+    }
+
     /// Get comprehensive information about a secret without exposing the data
     pub async fn get_secret_info(&self, secret_name: &str) -> Result<Option<SecretInfo>> {
         // Get secret metadata
@@ -599,6 +743,9 @@ impl Database {
             });
         }
 
+        // Get recipient information from secrets_keys table
+        let recipients = self.get_secret_keys(secret_name).await?;
+
         Ok(Some(SecretInfo {
             name: secret.name,
             description: secret.description,
@@ -608,6 +755,7 @@ impl Database {
             total_versions: all_versions.len() as i64,
             latest_version: all_versions.first().copied(),
             versions: version_info,
+            recipients,
         }))
     }
 }
