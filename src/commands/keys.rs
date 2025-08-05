@@ -1,10 +1,9 @@
-use chrono::Utc;
 use dialoguer::Select;
 use lilvault::cli::KeyCommands;
 use lilvault::crypto::{
     decrypt_master_key, decrypt_with_identity, encrypt_for_recipients, generate_fingerprint,
-    generate_master_key, get_password, host_key_to_recipient, parse_ssh_public_key,
-    vault_key_to_recipient,
+    generate_master_key, get_password, get_password_with_confirmation, host_key_to_recipient,
+    parse_ssh_public_key, vault_key_to_recipient,
 };
 use lilvault::db::{
     Database,
@@ -73,34 +72,21 @@ async fn handle_add_vault(
     no_reencrypt: bool,
 ) -> Result<()> {
     // Get password
-    let password = if let Some(path) = password_file {
-        get_password("", Some(path)).into_diagnostic()?
-    } else {
-        let password = get_password("Enter password for new vault key", None).into_diagnostic()?;
-        let confirm_password = get_password("Confirm password", None).into_diagnostic()?;
-
-        if password != confirm_password {
-            error!("Passwords do not match");
-            std::process::exit(1);
-        }
-        password
-    };
+    let password =
+        get_password_with_confirmation("Enter password for new vault key", password_file, true)
+            .into_diagnostic()?;
 
     // Generate vault key
     let (public_key, encrypted_private_key) = generate_master_key(&password).into_diagnostic()?;
     let fingerprint = generate_fingerprint(&public_key);
 
     // Create vault key record
-    let now = Utc::now();
-    let vault_key = Key {
-        fingerprint: fingerprint.clone(),
-        key_type: "vault".to_string(),
-        name: name.clone(),
-        public_key: public_key.clone(),
-        encrypted_private_key: Some(encrypted_private_key),
-        created_at: now,
-        updated_at: now,
-    };
+    let vault_key = Key::new_vault_key(
+        fingerprint.clone(),
+        name.clone(),
+        public_key.clone(),
+        encrypted_private_key,
+    );
 
     // Store in database
     db.insert_key(&vault_key).await.into_diagnostic()?;
@@ -172,16 +158,11 @@ async fn handle_add_host(
     let fingerprint = generate_fingerprint(ssh_public_key);
 
     // Create host key record
-    let now = Utc::now();
-    let host_key = Key {
-        fingerprint: fingerprint.clone(),
-        key_type: "host".to_string(),
-        name: hostname.clone(),
-        public_key: ssh_public_key.to_string(),
-        encrypted_private_key: None,
-        created_at: now,
-        updated_at: now,
-    };
+    let host_key = Key::new_host_key(
+        fingerprint.clone(),
+        hostname.clone(),
+        ssh_public_key.to_string(),
+    );
 
     // Store in database
     db.insert_key(&host_key).await.into_diagnostic()?;
@@ -340,16 +321,7 @@ async fn handle_scan_host(
     let fingerprint = generate_fingerprint(&selected_public_key);
 
     // Create host key record
-    let now = Utc::now();
-    let host_key = Key {
-        fingerprint: fingerprint.clone(),
-        key_type: "host".to_string(),
-        name: hostname.clone(),
-        public_key: selected_public_key,
-        encrypted_private_key: None,
-        created_at: now,
-        updated_at: now,
-    };
+    let host_key = Key::new_host_key(fingerprint.clone(), hostname.clone(), selected_public_key);
 
     // Store in database
     db.insert_key(&host_key).await.into_diagnostic()?;
@@ -617,16 +589,13 @@ async fn reencrypt_secrets_for_new_key(
         // Store encrypted copies for each key
         let mut stored_count = 0;
         for key in all_keys {
-            let new_storage = SecretStorage {
-                id: 0, // Will be auto-generated
-                secret_name: secret_name.clone(),
-                version: new_version,
-                key_fingerprint: key.fingerprint.clone(),
-                key_type: key.key_type.clone(),
-                encrypted_data: encrypted_data.clone(),
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            };
+            let new_storage = SecretStorage::new(
+                secret_name.clone(),
+                new_version,
+                key.fingerprint.clone(),
+                key.key_type.clone(),
+                encrypted_data.clone(),
+            );
 
             db.insert_secret_storage(&new_storage)
                 .await

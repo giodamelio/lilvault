@@ -578,3 +578,30 @@ mod tests {
         std::env::remove_var("EDITOR");
     }
 }
+
+/// Get password with optional confirmation prompt
+/// If password_file is provided, reads password from file
+/// Otherwise prompts user and optionally confirms password
+pub fn get_password_with_confirmation(
+    prompt: &str,
+    password_file: Option<&std::path::Path>,
+    require_confirmation: bool,
+) -> Result<String> {
+    if let Some(path) = password_file {
+        get_password("", Some(path))
+    } else {
+        let password = get_password(prompt, None)?;
+
+        if require_confirmation {
+            let confirm_password = get_password("Confirm password", None)?;
+
+            if password != confirm_password {
+                return Err(LilVaultError::Internal {
+                    message: "Passwords do not match".to_string(),
+                });
+            }
+        }
+
+        Ok(password)
+    }
+}

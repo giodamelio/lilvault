@@ -1,5 +1,4 @@
-use chrono::Utc;
-use lilvault::crypto::{generate_fingerprint, generate_master_key, get_password};
+use lilvault::crypto::{generate_fingerprint, generate_master_key, get_password_with_confirmation};
 use lilvault::db::{Database, models::Key};
 use miette::{IntoDiagnostic, Result};
 use std::path::Path;
@@ -13,34 +12,21 @@ pub async fn handle_init(db: &Database, name: String, password_file: Option<&Pat
     }
 
     // Get password
-    let password = if let Some(path) = password_file {
-        get_password("", Some(path)).into_diagnostic()?
-    } else {
-        let password = get_password("Enter password for vault key", None).into_diagnostic()?;
-        let confirm_password = get_password("Confirm password", None).into_diagnostic()?;
-
-        if password != confirm_password {
-            error!("Passwords do not match");
-            std::process::exit(1);
-        }
-        password
-    };
+    let password =
+        get_password_with_confirmation("Enter password for vault key", password_file, true)
+            .into_diagnostic()?;
 
     // Generate vault key
     let (public_key, encrypted_private_key) = generate_master_key(&password).into_diagnostic()?;
     let fingerprint = generate_fingerprint(&public_key);
 
     // Create vault key record
-    let now = Utc::now();
-    let vault_key = Key {
-        fingerprint: fingerprint.clone(),
-        key_type: "vault".to_string(),
-        name: name.clone(),
-        public_key: public_key.clone(),
-        encrypted_private_key: Some(encrypted_private_key),
-        created_at: now,
-        updated_at: now,
-    };
+    let vault_key = Key::new_vault_key(
+        fingerprint.clone(),
+        name.clone(),
+        public_key.clone(),
+        encrypted_private_key,
+    );
 
     // Store in database
     db.insert_key(&vault_key).await.into_diagnostic()?;
