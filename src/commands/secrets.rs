@@ -55,14 +55,151 @@ pub async fn handle_secrets(db: &Database, command: SecretCommands) -> Result<()
 
 // TODO: Implement individual handler functions
 async fn handle_store(
-    _db: &Database,
-    _name: String,
-    _hosts: Option<String>,
-    _file: Option<std::path::PathBuf>,
-    _stdin: bool,
-    _description: Option<String>,
+    db: &Database,
+    name: String,
+    hosts: Option<String>,
+    file: Option<std::path::PathBuf>,
+    stdin: bool,
+    description: Option<String>,
 ) -> Result<()> {
-    todo!("Implement store command")
+    use chrono::Utc;
+    use lilvault::crypto::{encrypt_for_recipients, host_key_to_recipient, vault_key_to_recipient};
+    use lilvault::db::models::{Secret, SecretStorage};
+    use miette::IntoDiagnostic;
+    use std::fs;
+    use tracing::{error, info, warn};
+
+    // Read secret data
+    let secret_data = if stdin {
+        use std::io::Read;
+        let mut buffer = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .into_diagnostic()?;
+        buffer.trim().as_bytes().to_vec()
+    } else if let Some(file_path) = file {
+        fs::read(&file_path)
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to read file '{}': {}", file_path.display(), e))?
+    } else {
+        error!("Must specify either --file or --stdin");
+        std::process::exit(1);
+    };
+
+    // Get all vault keys and specified host keys
+    let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+    let mut target_keys = Vec::new();
+
+    // Add all vault keys as recipients
+    for vault_key in &vault_keys {
+        let recipient = vault_key_to_recipient(&vault_key.public_key).into_diagnostic()?;
+        target_keys.push((
+            vault_key.fingerprint.clone(),
+            "vault".to_string(),
+            recipient,
+        ));
+    }
+
+    // Add specified host keys
+    if let Some(host_list) = hosts {
+        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
+        for hostname in hostnames {
+            if let Some(host_key) = db
+                .get_host_key_by_hostname(hostname)
+                .await
+                .into_diagnostic()?
+            {
+                let ssh_recipient =
+                    host_key_to_recipient(&host_key.public_key).into_diagnostic()?;
+                target_keys.push((
+                    host_key.fingerprint.clone(),
+                    "host".to_string(),
+                    ssh_recipient,
+                ));
+            } else {
+                warn!("Host '{hostname}' not found, skipping");
+            }
+        }
+    } else {
+        // If no hosts specified, add all host keys
+        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+        for host_key in all_host_keys {
+            let ssh_recipient = host_key_to_recipient(&host_key.public_key).into_diagnostic()?;
+            target_keys.push((
+                host_key.fingerprint.clone(),
+                "host".to_string(),
+                ssh_recipient,
+            ));
+        }
+    }
+
+    if target_keys.is_empty() {
+        error!("No keys available for encryption");
+        std::process::exit(1);
+    }
+
+    // Create or update secret metadata
+    let secret_exists = db.get_secret(&name).await.into_diagnostic()?.is_some();
+    if !secret_exists {
+        let now = Utc::now();
+        let secret = Secret {
+            name: name.clone(),
+            description: description.clone(),
+            template: None,
+            created_at: now,
+            updated_at: now,
+        };
+        db.insert_secret(&secret).await.into_diagnostic()?;
+    }
+
+    // Get next version number
+    let version = db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+    let mut stored_count = 0;
+
+    // Store encrypted data for each target key (per-key encryption)
+    for (key_fingerprint, key_type, recipient) in target_keys {
+        // Encrypt secret data for this specific key
+        let encrypted_data =
+            encrypt_for_recipients(&secret_data, vec![recipient]).into_diagnostic()?;
+
+        let storage_entry = SecretStorage::new(
+            name.clone(),
+            version,
+            key_fingerprint.clone(),
+            key_type.clone(),
+            encrypted_data,
+        );
+
+        db.insert_secret_storage(&storage_entry)
+            .await
+            .into_diagnostic()?;
+        stored_count += 1;
+    }
+
+    // Log audit entry
+    db.log_audit(
+        "STORE_SECRET",
+        &name,
+        Some(&format!(
+            "Stored secret version {version} for {stored_count} keys"
+        )),
+        Some(version),
+        true,
+        None,
+    )
+    .await
+    .into_diagnostic()?;
+
+    info!("✓ Secret stored successfully!");
+    info!("  Name: {name}");
+    info!("  Version: {version}");
+    info!("  Encrypted for {stored_count} keys");
+    if let Some(desc) = description {
+        info!("  Description: {desc}");
+    }
+
+    Ok(())
 }
 
 async fn handle_get(
@@ -478,14 +615,166 @@ async fn handle_delete(db: &Database, name: String) -> Result<()> {
 }
 
 async fn handle_generate(
-    _db: &Database,
-    _name: String,
-    _length: usize,
-    _format: String,
-    _hosts: Option<String>,
-    _description: Option<String>,
+    db: &Database,
+    name: String,
+    length: usize,
+    format: String,
+    hosts: Option<String>,
+    description: Option<String>,
 ) -> Result<()> {
-    todo!("Implement generate command")
+    use chrono::Utc;
+    use lilvault::crypto::{encrypt_for_recipients, host_key_to_recipient, vault_key_to_recipient};
+    use lilvault::db::models::{Secret, SecretStorage};
+    use miette::IntoDiagnostic;
+    use rand::RngCore;
+    use tracing::{error, info, warn};
+
+    // Generate random bytes using a cryptographically secure RNG
+    let mut rng = rand::thread_rng();
+    let mut random_bytes = vec![0u8; length];
+    rng.fill_bytes(&mut random_bytes);
+
+    // Format the random data according to the specified format
+    let secret_data = match format.as_str() {
+        "hex" => hex::encode(&random_bytes).into_bytes(),
+        "base64" => {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .encode(&random_bytes)
+                .into_bytes()
+        }
+        "alphanumeric" => {
+            use rand::seq::SliceRandom;
+            const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            (0..length)
+                .map(|_| *CHARS.choose(&mut rng).unwrap())
+                .collect::<Vec<u8>>()
+        }
+        _ => {
+            error!(
+                "Invalid format '{}'. Use 'hex', 'base64', or 'alphanumeric'",
+                format
+            );
+            std::process::exit(1);
+        }
+    };
+
+    // Get all vault keys and specified host keys (reuse logic from Store command)
+    let vault_keys = db.get_all_vault_keys().await.into_diagnostic()?;
+    let mut target_keys = Vec::new();
+
+    // Add all vault keys as recipients
+    for vault_key in &vault_keys {
+        let recipient = vault_key_to_recipient(&vault_key.public_key).into_diagnostic()?;
+        target_keys.push((
+            vault_key.fingerprint.clone(),
+            "vault".to_string(),
+            recipient,
+        ));
+    }
+
+    // Add specified host keys
+    if let Some(host_list) = hosts {
+        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
+        for hostname in hostnames {
+            if let Some(host_key) = db
+                .get_host_key_by_hostname(hostname)
+                .await
+                .into_diagnostic()?
+            {
+                let ssh_recipient =
+                    host_key_to_recipient(&host_key.public_key).into_diagnostic()?;
+                target_keys.push((
+                    host_key.fingerprint.clone(),
+                    "host".to_string(),
+                    ssh_recipient,
+                ));
+            } else {
+                warn!("Host '{hostname}' not found, skipping");
+            }
+        }
+    } else {
+        // If no hosts specified, add all host keys
+        let all_host_keys = db.get_all_host_keys().await.into_diagnostic()?;
+        for host_key in all_host_keys {
+            let ssh_recipient = host_key_to_recipient(&host_key.public_key).into_diagnostic()?;
+            target_keys.push((
+                host_key.fingerprint.clone(),
+                "host".to_string(),
+                ssh_recipient,
+            ));
+        }
+    }
+
+    if target_keys.is_empty() {
+        error!("No keys available for encryption");
+        std::process::exit(1);
+    }
+
+    // Create or update secret metadata
+    let secret_exists = db.get_secret(&name).await.into_diagnostic()?.is_some();
+    if !secret_exists {
+        let now = Utc::now();
+        let secret = Secret {
+            name: name.clone(),
+            description: description.clone(),
+            template: None,
+            created_at: now,
+            updated_at: now,
+        };
+        db.insert_secret(&secret).await.into_diagnostic()?;
+    }
+
+    // Get next version number
+    let version = db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+    let mut stored_count = 0;
+
+    // Store encrypted data for each target key (per-key encryption)
+    for (key_fingerprint, key_type, recipient) in target_keys {
+        // Encrypt secret data for this specific key
+        let encrypted_data =
+            encrypt_for_recipients(&secret_data, vec![recipient]).into_diagnostic()?;
+
+        let storage_entry = SecretStorage::new(
+            name.clone(),
+            version,
+            key_fingerprint.clone(),
+            key_type.clone(),
+            encrypted_data,
+        );
+
+        db.insert_secret_storage(&storage_entry)
+            .await
+            .into_diagnostic()?;
+        stored_count += 1;
+    }
+
+    // Log audit entry
+    db.log_audit(
+        "GENERATE_SECRET",
+        &name,
+        Some(&format!(
+            "Generated {format} secret (length {length}) version {version} for {stored_count} keys"
+        )),
+        Some(version),
+        true,
+        None,
+    )
+    .await
+    .into_diagnostic()?;
+
+    info!("✓ Secret generated and stored successfully!");
+    info!("  Name: {name}");
+    info!("  Format: {format}");
+    info!("  Length: {length}");
+    info!("  Version: {version}");
+    info!("  Encrypted for {stored_count} keys");
+    if let Some(desc) = description {
+        info!("  Description: {desc}");
+    }
+
+    Ok(())
 }
 
 async fn handle_info(db: &Database, name: String) -> Result<()> {
@@ -759,13 +1048,251 @@ async fn handle_edit(
 }
 
 async fn handle_share(
-    _db: &Database,
-    _name: String,
-    _hosts: String,
-    _vault_key: Option<String>,
-    _password_file: Option<&std::path::Path>,
+    db: &Database,
+    name: String,
+    hosts: String,
+    vault_key: Option<String>,
+    password_file: Option<&std::path::Path>,
 ) -> Result<()> {
-    todo!("Implement share command")
+    use chrono::Utc;
+    use dialoguer::Select;
+    use lilvault::crypto::{
+        decrypt_secret_with_vault_key, encrypt_for_recipients, get_password, host_key_to_recipient,
+        vault_key_to_recipient,
+    };
+    use lilvault::db::models::{SecretKey, SecretStorage};
+    use miette::IntoDiagnostic;
+    use tracing::{error, info};
+
+    // Check if secret exists
+    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
+        error!("Secret '{name}' not found");
+        std::process::exit(1);
+    }
+
+    // Parse hostnames
+    let hostnames: Vec<&str> = hosts.split(',').map(|h| h.trim()).collect();
+    if hostnames.is_empty() {
+        error!("No hosts specified");
+        std::process::exit(1);
+    }
+
+    // Validate that all hostnames exist as host keys
+    let mut host_keys = Vec::new();
+    for hostname in &hostnames {
+        match db
+            .get_host_key_by_hostname(hostname)
+            .await
+            .into_diagnostic()?
+        {
+            Some(key) => host_keys.push(key),
+            None => {
+                error!("Host key not found for hostname: {hostname}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Get vault keys for selection
+    let vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
+    if vault_keys.is_empty() {
+        error!("No vault keys available for decryption");
+        std::process::exit(1);
+    }
+
+    // Select vault key to use for decryption
+    let selected_vault_key = if let Some(key_fingerprint) = vault_key {
+        vault_keys
+            .iter()
+            .find(|k| k.fingerprint == key_fingerprint)
+            .cloned()
+    } else if vault_keys.len() == 1 {
+        Some(vault_keys[0].clone())
+    } else {
+        // Multiple vault keys, let user choose
+        let items: Vec<String> = vault_keys
+            .iter()
+            .map(|k| format!("{} ({})", k.name, &k.fingerprint[..8]))
+            .collect();
+
+        let selection = Select::new()
+            .with_prompt("Select vault key to decrypt secret for sharing")
+            .items(&items)
+            .interact()
+            .into_diagnostic()?;
+
+        Some(vault_keys[selection].clone())
+    };
+
+    let selected_vault_key = match selected_vault_key {
+        Some(key) => key,
+        None => {
+            error!("Specified vault key not found");
+            std::process::exit(1);
+        }
+    };
+
+    // Get password for vault key
+    let password = get_password(
+        &format!("Enter password for vault key '{}'", selected_vault_key.name),
+        password_file,
+    )
+    .into_diagnostic()?;
+
+    // Get the latest version of the secret
+    let latest_version = match db
+        .get_latest_secret_version(&name)
+        .await
+        .into_diagnostic()?
+    {
+        Some(version) => version,
+        None => {
+            error!("No versions found for secret '{name}'");
+            std::process::exit(1);
+        }
+    };
+
+    // Get encrypted data for the vault key
+    let storage = db
+        .get_secret_storage_for_key(&name, latest_version, &selected_vault_key.fingerprint)
+        .await
+        .into_diagnostic()?;
+
+    let encrypted_data = match storage {
+        Some(s) => s.encrypted_data,
+        None => {
+            error!("Secret '{name}' not accessible with this vault key");
+            std::process::exit(1);
+        }
+    };
+
+    // Decrypt the secret
+    let decrypted_data = decrypt_secret_with_vault_key(
+        &encrypted_data,
+        selected_vault_key.encrypted_private_key.as_ref().unwrap(),
+        &password,
+    )
+    .into_diagnostic()?;
+
+    // Get the next version number for this secret
+    let new_version = db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+    // Get all current keys that the secret is encrypted for
+    let current_vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
+
+    // Get all keys that this secret is currently encrypted for
+    let secret_key_info = db.get_secret_keys(&name).await.into_diagnostic()?;
+    let current_host_keys: Vec<_> = {
+        let mut host_keys = Vec::new();
+        for key_info in &secret_key_info {
+            if key_info.key_type == "host" {
+                if let Some(key) = db.get_key(&key_info.fingerprint).await.into_diagnostic()? {
+                    host_keys.push(key);
+                }
+            }
+        }
+        host_keys
+    };
+
+    // Combine current host keys with new host keys (avoid duplicates)
+    let mut all_host_keys = current_host_keys.clone();
+    for new_host_key in &host_keys {
+        if !all_host_keys
+            .iter()
+            .any(|existing| existing.fingerprint == new_host_key.fingerprint)
+        {
+            all_host_keys.push(new_host_key.clone());
+        }
+    }
+
+    // Create recipients for all keys (vault + all host keys)
+    let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+
+    for key in &current_vault_keys {
+        recipients.push(vault_key_to_recipient(&key.public_key).into_diagnostic()?);
+    }
+
+    for key in &all_host_keys {
+        recipients.push(host_key_to_recipient(&key.public_key).into_diagnostic()?);
+    }
+
+    // Encrypt the secret for all recipients
+    let encrypted_data = encrypt_for_recipients(&decrypted_data, recipients).into_diagnostic()?;
+
+    // Store encrypted copies for each key
+    let mut stored_count = 0;
+
+    // Store for vault keys
+    for key in &current_vault_keys {
+        let storage_entry = SecretStorage::new(
+            name.clone(),
+            new_version,
+            key.fingerprint.clone(),
+            "vault".to_string(),
+            encrypted_data.clone(),
+        );
+        db.insert_secret_storage(&storage_entry)
+            .await
+            .into_diagnostic()?;
+        stored_count += 1;
+    }
+
+    // Store for all host keys (existing + new)
+    for key in &all_host_keys {
+        let storage_entry = SecretStorage::new(
+            name.clone(),
+            new_version,
+            key.fingerprint.clone(),
+            "host".to_string(),
+            encrypted_data.clone(),
+        );
+        db.insert_secret_storage(&storage_entry)
+            .await
+            .into_diagnostic()?;
+        stored_count += 1;
+    }
+
+    // Update secrets_keys table with new host keys
+    for host_key in &host_keys {
+        // Check if relationship already exists
+        if !db
+            .is_secret_encrypted_for_key_new(&name, &host_key.fingerprint)
+            .await
+            .into_diagnostic()?
+        {
+            let now = Utc::now();
+            let secret_key = SecretKey {
+                secret_name: name.clone(),
+                key_fingerprint: host_key.fingerprint.clone(),
+                key_type: "host".to_string(),
+                created_at: now,
+                updated_at: now,
+            };
+            db.insert_secret_key(&secret_key).await.into_diagnostic()?;
+        }
+    }
+
+    // Log audit entry
+    let host_list = hostnames.join(", ");
+    db.log_audit(
+        "SHARE_SECRET",
+        &name,
+        Some(&format!(
+            "Shared secret version {new_version} with hosts: {host_list}"
+        )),
+        Some(new_version),
+        true,
+        None,
+    )
+    .await
+    .into_diagnostic()?;
+
+    info!("✓ Secret '{}' shared successfully!", name);
+    info!("  New version: {}", new_version);
+    info!("  Shared with hosts: {}", host_list);
+    info!("  Total keys with access: {}", stored_count);
+
+    Ok(())
 }
 
 async fn handle_unshare(db: &Database, name: String, hosts: String) -> Result<()> {
