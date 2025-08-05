@@ -120,8 +120,8 @@ async fn handle_store(
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to create temporary file: {}", e))?;
 
-        // Write placeholder content
-        temp_file.write_all(b"# Enter your secret below (lines starting with # will be ignored)\n# Save and exit to continue\n\n")
+        // Write placeholder content (git-style with instructions below)
+        temp_file.write_all(b"\n# Please enter your secret above.\n# Lines starting with '#' will be ignored, and an empty message aborts the operation.\n")
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to write to temporary file: {}", e))?;
 
@@ -150,16 +150,18 @@ async fn handle_store(
         // Filter out comment lines and get final content
         let filtered_content: String = content
             .lines()
-            .filter(|line| !line.trim().starts_with('#') && !line.trim().is_empty())
+            .filter(|line| !line.trim().starts_with('#'))
             .collect::<Vec<&str>>()
-            .join("\n");
+            .join("\n")
+            .trim() // Trim all leading/trailing whitespace including newlines
+            .to_string();
 
-        if filtered_content.trim().is_empty() {
+        if filtered_content.is_empty() {
             error!("No secret content provided (empty or only comments)");
             std::process::exit(1);
         }
 
-        filtered_content.trim().as_bytes().to_vec()
+        filtered_content.as_bytes().to_vec()
     };
 
     // Get all vault keys and specified host keys
