@@ -1697,6 +1697,319 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+
+                SecretCommands::Share {
+                    name,
+                    hosts,
+                    vault_key,
+                    password_file,
+                } => {
+                    // Check if secret exists
+                    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
+                        error!("Secret '{name}' not found");
+                        std::process::exit(1);
+                    }
+
+                    // Parse hostnames
+                    let hostnames: Vec<&str> = hosts.split(',').map(|h| h.trim()).collect();
+                    if hostnames.is_empty() {
+                        error!("No hosts specified");
+                        std::process::exit(1);
+                    }
+
+                    // Validate that all hostnames exist as host keys
+                    let mut host_keys = Vec::new();
+                    for hostname in &hostnames {
+                        match db
+                            .get_host_key_by_hostname(hostname)
+                            .await
+                            .into_diagnostic()?
+                        {
+                            Some(key) => host_keys.push(key),
+                            None => {
+                                error!("Host key not found for hostname: {hostname}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+
+                    // Get vault keys for selection
+                    let vault_keys = db.get_keys_by_type("vault").await.into_diagnostic()?;
+                    if vault_keys.is_empty() {
+                        error!("No vault keys available for decryption");
+                        std::process::exit(1);
+                    }
+
+                    // Select vault key to use for decryption
+                    let selected_vault_key = if let Some(key_fingerprint) = vault_key {
+                        vault_keys
+                            .iter()
+                            .find(|k| k.fingerprint == key_fingerprint)
+                            .cloned()
+                    } else if vault_keys.len() == 1 {
+                        Some(vault_keys[0].clone())
+                    } else {
+                        // Multiple vault keys, let user choose
+                        let items: Vec<String> = vault_keys
+                            .iter()
+                            .map(|k| format!("{} ({})", k.name, &k.fingerprint[..8]))
+                            .collect();
+
+                        let selection = Select::new()
+                            .with_prompt("Select vault key to decrypt secret for sharing")
+                            .items(&items)
+                            .interact()
+                            .into_diagnostic()?;
+
+                        Some(vault_keys[selection].clone())
+                    };
+
+                    let vault_key = match selected_vault_key {
+                        Some(key) => key,
+                        None => {
+                            error!("Specified vault key not found");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get password for vault key
+                    let password = get_password(
+                        &format!("Enter password for vault key '{}'", vault_key.name),
+                        password_file.as_deref(),
+                    )?;
+
+                    // Get the latest version of the secret
+                    let latest_version = match db
+                        .get_latest_secret_version(&name)
+                        .await
+                        .into_diagnostic()?
+                    {
+                        Some(version) => version,
+                        None => {
+                            error!("No versions found for secret '{name}'");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get encrypted data for the vault key
+                    let storage = db
+                        .get_secret_storage_for_key(&name, latest_version, &vault_key.fingerprint)
+                        .await
+                        .into_diagnostic()?;
+
+                    let encrypted_data = match storage {
+                        Some(s) => s.encrypted_data,
+                        None => {
+                            error!("Secret '{name}' not accessible with this vault key");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Decrypt the secret
+                    let decrypted_data = decrypt_secret_with_vault_key(
+                        &encrypted_data,
+                        vault_key.encrypted_private_key.as_ref().unwrap(),
+                        &password,
+                    )?;
+
+                    // Get the next version number for this secret
+                    let new_version = db.get_next_secret_version(&name).await.into_diagnostic()?;
+
+                    // Get all current keys that the secret is encrypted for
+                    let current_vault_keys =
+                        db.get_keys_by_type("vault").await.into_diagnostic()?;
+                    // Get all keys that this secret is currently encrypted for
+                    let secret_key_info = db.get_secret_keys(&name).await.into_diagnostic()?;
+                    let current_host_keys: Vec<Key> = {
+                        let mut host_keys = Vec::new();
+                        for key_info in &secret_key_info {
+                            if key_info.key_type == "host" {
+                                if let Some(key) =
+                                    db.get_key(&key_info.fingerprint).await.into_diagnostic()?
+                                {
+                                    host_keys.push(key);
+                                }
+                            }
+                        }
+                        host_keys
+                    };
+
+                    // Combine current host keys with new host keys (avoid duplicates)
+                    let mut all_host_keys = current_host_keys.clone();
+                    for new_host_key in &host_keys {
+                        if !all_host_keys
+                            .iter()
+                            .any(|existing| existing.fingerprint == new_host_key.fingerprint)
+                        {
+                            all_host_keys.push(new_host_key.clone());
+                        }
+                    }
+
+                    // Create recipients for all keys (vault + all host keys)
+                    let mut recipients: Vec<Box<dyn age::Recipient + Send>> = Vec::new();
+
+                    for key in &current_vault_keys {
+                        recipients.push(vault_key_to_recipient(&key.public_key)?);
+                    }
+
+                    for key in &all_host_keys {
+                        recipients.push(host_key_to_recipient(&key.public_key)?);
+                    }
+
+                    // Encrypt the secret for all recipients
+                    let encrypted_data = encrypt_for_recipients(&decrypted_data, recipients)?;
+
+                    // Store encrypted copies for each key
+                    let mut stored_count = 0;
+
+                    // Store for vault keys
+                    for key in &current_vault_keys {
+                        let storage_entry = SecretStorage {
+                            id: 0,
+                            secret_name: name.clone(),
+                            version: new_version,
+                            key_fingerprint: key.fingerprint.clone(),
+                            key_type: "vault".to_string(),
+                            encrypted_data: encrypted_data.clone(),
+                            created_at: Utc::now(),
+                            updated_at: Utc::now(),
+                        };
+                        db.insert_secret_storage(&storage_entry)
+                            .await
+                            .into_diagnostic()?;
+                        stored_count += 1;
+                    }
+
+                    // Store for all host keys (existing + new)
+                    for key in &all_host_keys {
+                        let storage_entry = SecretStorage {
+                            id: 0,
+                            secret_name: name.clone(),
+                            version: new_version,
+                            key_fingerprint: key.fingerprint.clone(),
+                            key_type: "host".to_string(),
+                            encrypted_data: encrypted_data.clone(),
+                            created_at: Utc::now(),
+                            updated_at: Utc::now(),
+                        };
+                        db.insert_secret_storage(&storage_entry)
+                            .await
+                            .into_diagnostic()?;
+                        stored_count += 1;
+                    }
+
+                    // Update secrets_keys table with new host keys
+                    for host_key in &host_keys {
+                        // Check if relationship already exists
+                        if !db
+                            .is_secret_encrypted_for_key_new(&name, &host_key.fingerprint)
+                            .await
+                            .into_diagnostic()?
+                        {
+                            let now = Utc::now();
+                            let secret_key = SecretKey {
+                                secret_name: name.clone(),
+                                key_fingerprint: host_key.fingerprint.clone(),
+                                key_type: "host".to_string(),
+                                created_at: now,
+                                updated_at: now,
+                            };
+                            db.insert_secret_key(&secret_key).await.into_diagnostic()?;
+                        }
+                    }
+
+                    // Log audit entry
+                    let host_list = hostnames.join(", ");
+                    db.log_audit(
+                        "SHARE_SECRET",
+                        &name,
+                        Some(&format!(
+                            "Shared secret version {new_version} with hosts: {host_list}"
+                        )),
+                        Some(new_version),
+                        true,
+                        None,
+                    )
+                    .await
+                    .into_diagnostic()?;
+
+                    info!("✓ Secret '{}' shared successfully!", name);
+                    info!("  New version: {}", new_version);
+                    info!("  Shared with hosts: {}", host_list);
+                    info!("  Total keys with access: {}", stored_count);
+                }
+
+                SecretCommands::Unshare { name, hosts } => {
+                    // Check if secret exists
+                    if db.get_secret(&name).await.into_diagnostic()?.is_none() {
+                        error!("Secret '{name}' not found");
+                        std::process::exit(1);
+                    }
+
+                    // Parse hostnames
+                    let hostnames: Vec<&str> = hosts.split(',').map(|h| h.trim()).collect();
+                    if hostnames.is_empty() {
+                        error!("No hosts specified");
+                        std::process::exit(1);
+                    }
+
+                    // Get host keys to remove
+                    let mut host_keys_to_remove = Vec::new();
+                    for hostname in &hostnames {
+                        match db
+                            .get_host_key_by_hostname(hostname)
+                            .await
+                            .into_diagnostic()?
+                        {
+                            Some(key) => host_keys_to_remove.push(key),
+                            None => {
+                                warn!("Host key not found for hostname: {hostname}");
+                            }
+                        }
+                    }
+
+                    if host_keys_to_remove.is_empty() {
+                        error!("No valid host keys found to remove");
+                        std::process::exit(1);
+                    }
+
+                    // Remove secret-key relationships
+                    let mut removed_count = 0;
+                    for host_key in &host_keys_to_remove {
+                        if db
+                            .remove_secret_key(&name, &host_key.fingerprint)
+                            .await
+                            .into_diagnostic()?
+                        {
+                            removed_count += 1;
+                        }
+                    }
+
+                    // Note: We don't remove the encrypted storage entries because:
+                    // 1. They serve as audit trail
+                    // 2. Future versions won't include these hosts
+                    // 3. The secrets_keys table controls access, not secret_storage
+
+                    // Log audit entry
+                    let host_list = hostnames.join(", ");
+                    db.log_audit(
+                        "UNSHARE_SECRET",
+                        &name,
+                        Some(&format!(
+                            "Unshared secret from hosts: {host_list} (removed {removed_count} relationships)"
+                        )),
+                        None,
+                        true,
+                        None,
+                    )
+                    .await
+                    .into_diagnostic()?;
+
+                    info!("✓ Secret '{}' unshared successfully!", name);
+                    info!("  Removed access for hosts: {}", host_list);
+                    info!("  Relationships removed: {}", removed_count);
+                    info!("  Note: New versions of this secret will not include these hosts");
+                }
             }
         }
 

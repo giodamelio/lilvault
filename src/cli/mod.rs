@@ -198,6 +198,30 @@ pub enum SecretCommands {
         #[arg(long)]
         password_file: Option<PathBuf>,
     },
+
+    /// Share a secret with additional hosts
+    Share {
+        /// Name of the secret to share
+        name: String,
+        /// Hosts to share with (comma-separated hostnames)
+        #[arg(long)]
+        hosts: String,
+        /// Vault key fingerprint to use for decryption
+        #[arg(long)]
+        vault_key: Option<String>,
+        /// Path to file containing the password (for non-interactive use)
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+    },
+
+    /// Unshare a secret from hosts
+    Unshare {
+        /// Name of the secret to unshare
+        name: String,
+        /// Hosts to unshare from (comma-separated hostnames)
+        #[arg(long)]
+        hosts: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
