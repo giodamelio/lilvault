@@ -233,6 +233,14 @@ impl Database {
         secret_storage::get_secrets_for_key(&self.pool, key_fingerprint).await
     }
 
+    /// Get detailed information about secrets accessible by a specific key
+    pub async fn get_secrets_with_details_for_key(
+        &self,
+        key_fingerprint: &str,
+    ) -> Result<Vec<(String, Option<String>, i64, chrono::DateTime<chrono::Utc>)>> {
+        secret_storage::get_secrets_with_details_for_key(&self.pool, key_fingerprint).await
+    }
+
     // Audit Log Operations
 
     /// Insert a new audit log entry

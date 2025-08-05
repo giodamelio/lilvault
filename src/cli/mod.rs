@@ -118,6 +118,12 @@ pub enum KeyCommands {
         /// New name for the key
         new_name: String,
     },
+
+    /// List secrets accessible by a host key
+    Secrets {
+        /// Hostname or key fingerprint to check access for
+        identifier: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -126,9 +132,8 @@ pub enum SecretCommands {
     Store {
         /// Name of the secret
         name: String,
-        /// Hosts that should have access (comma-separated)
-        #[arg(long)]
-        hosts: Option<String>,
+        /// Hosts that should have access to this secret (defaults to all hosts if none specified)
+        hosts: Vec<String>,
         /// Read secret from file
         #[arg(long, conflicts_with = "stdin")]
         file: Option<PathBuf>,
@@ -178,15 +183,14 @@ pub enum SecretCommands {
     Generate {
         /// Name of the secret
         name: String,
+        /// Hosts that should have access to this secret (defaults to all hosts if none specified)
+        hosts: Vec<String>,
         /// Length of the generated secret
         #[arg(long, default_value = "32")]
         length: usize,
         /// Format of the generated secret
         #[arg(long, default_value = "hex", value_parser = ["hex", "base64", "alphanumeric"])]
         format: String,
-        /// Hosts that should have access (comma-separated)
-        #[arg(long)]
-        hosts: Option<String>,
         /// Optional description for the secret
         #[arg(long)]
         description: Option<String>,

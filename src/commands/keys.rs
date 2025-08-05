@@ -71,6 +71,8 @@ pub async fn handle_keys(db: &Database, command: KeyCommands) -> Result<()> {
             identifier,
             new_name,
         } => handle_rename(db, identifier, new_name).await,
+
+        KeyCommands::Secrets { identifier } => handle_secrets(db, identifier).await,
     }
 }
 
@@ -770,6 +772,85 @@ async fn reencrypt_secrets_for_new_key(
     )
     .await
     .into_diagnostic()?;
+
+    Ok(())
+}
+
+/// Handle the secrets subcommand - list all secrets accessible by a host key
+async fn handle_secrets(db: &Database, identifier: String) -> Result<()> {
+    info!("🔍 Looking up secrets for key: {}", identifier);
+
+    // First, find the key by identifier (hostname or fingerprint)
+    let key = match db
+        .get_host_key_by_hostname(&identifier)
+        .await
+        .into_diagnostic()?
+    {
+        Some(key) => key,
+        None => {
+            // Try by fingerprint if hostname lookup failed
+            match db.get_key(&identifier).await.into_diagnostic()? {
+                Some(key) => {
+                    if !key.is_host_key() {
+                        return Err(miette::miette!(
+                            "Key '{}' is not a host key. Only host keys can be used to check secret access.",
+                            identifier
+                        ));
+                    }
+                    key
+                }
+                None => {
+                    return Err(miette::miette!(
+                        "Host key '{}' not found. Use 'lilvault keys list --key-type host' to see available host keys.",
+                        identifier
+                    ));
+                }
+            }
+        }
+    };
+
+    info!("📋 Found host key: {} ({})", key.name, key.fingerprint);
+
+    // Get detailed secrets accessible by this key
+    let secrets = db
+        .get_secrets_with_details_for_key(&key.fingerprint)
+        .await
+        .into_diagnostic()?;
+
+    if secrets.is_empty() {
+        info!("No secrets are accessible by host key '{}'", key.name);
+        return Ok(());
+    }
+
+    info!(
+        "✅ Secrets accessible by host '{}' ({}):",
+        key.name, key.fingerprint
+    );
+
+    #[derive(Tabled)]
+    struct SecretRow {
+        #[tabled(rename = "Secret Name")]
+        name: String,
+        #[tabled(rename = "Description")]
+        description: String,
+        #[tabled(rename = "Latest Version")]
+        version: i64,
+        #[tabled(rename = "Created")]
+        created: String,
+    }
+
+    let table_data: Vec<SecretRow> = secrets
+        .iter()
+        .map(|(name, description, version, created_at)| SecretRow {
+            name: name.clone(),
+            description: description.as_deref().unwrap_or("").to_string(),
+            version: *version,
+            created: created_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+        })
+        .collect();
+
+    let table = Table::new(table_data);
+    println!("{table}");
 
     Ok(())
 }

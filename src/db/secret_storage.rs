@@ -166,3 +166,31 @@ pub async fn is_secret_encrypted_for_key(
 
     Ok(count.0 > 0)
 }
+
+/// Get detailed information about secrets accessible by a specific key
+pub async fn get_secrets_with_details_for_key(
+    pool: &SqlitePool,
+    key_fingerprint: &str,
+) -> Result<Vec<(String, Option<String>, i64, chrono::DateTime<chrono::Utc>)>> {
+    type SecretDetailsRow = (String, Option<String>, i64, chrono::DateTime<chrono::Utc>);
+
+    let rows: Vec<SecretDetailsRow> = sqlx::query_as(
+        r#"
+        SELECT
+            s.name,
+            s.description,
+            MAX(ss.version) as latest_version,
+            s.created_at
+        FROM secrets s
+        INNER JOIN secret_storage ss ON s.name = ss.secret_name
+        WHERE ss.key_fingerprint = ?
+        GROUP BY s.name, s.description, s.created_at
+        ORDER BY s.name
+        "#,
+    )
+    .bind(key_fingerprint)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}

@@ -27,11 +27,11 @@ pub async fn handle_secrets(db: &Database, command: SecretCommands) -> Result<()
 
         SecretCommands::Generate {
             name,
+            hosts,
             length,
             format,
-            hosts,
             description,
-        } => handle_generate(db, name, length, format, hosts, description).await,
+        } => handle_generate(db, name, hosts, length, format, description).await,
 
         SecretCommands::Info { name } => handle_info(db, name).await,
 
@@ -56,7 +56,7 @@ pub async fn handle_secrets(db: &Database, command: SecretCommands) -> Result<()
 async fn handle_store(
     db: &Database,
     name: String,
-    hosts: Option<String>,
+    hosts: Vec<String>,
     file: Option<std::path::PathBuf>,
     stdin: bool,
     description: Option<String>,
@@ -66,10 +66,8 @@ async fn handle_store(
     if let Some(ref path) = file {
         validate_file_path(path)?;
     }
-    if let Some(hosts_str) = &hosts {
-        for hostname in hosts_str.split(',').map(|h| h.trim()) {
-            validate_hostname(hostname)?;
-        }
+    for hostname in &hosts {
+        validate_hostname(hostname)?;
     }
 
     // Begin transaction for atomic secret storage
@@ -95,8 +93,73 @@ async fn handle_store(
             .into_diagnostic()
             .map_err(|e| miette::miette!("Failed to read file '{}': {}", file_path.display(), e))?
     } else {
-        error!("Must specify either --file or --stdin");
-        std::process::exit(1);
+        // Default: use $EDITOR to edit the secret
+        use std::io::Write;
+        use std::process::Command;
+        use tempfile::NamedTempFile;
+
+        // Get editor from environment or use default
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
+            // Try common editors as fallbacks
+            if which::which("nano").is_ok() {
+                "nano".to_string()
+            } else if which::which("vim").is_ok() {
+                "vim".to_string()
+            } else if which::which("vi").is_ok() {
+                "vi".to_string()
+            } else {
+                error!("No EDITOR environment variable set and no common editors (nano, vim, vi) found in PATH");
+                std::process::exit(1);
+            }
+        });
+
+        info!("Opening editor to input secret: {}", editor);
+
+        // Create temporary file
+        let mut temp_file = NamedTempFile::new()
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to create temporary file: {}", e))?;
+
+        // Write placeholder content
+        temp_file.write_all(b"# Enter your secret below (lines starting with # will be ignored)\n# Save and exit to continue\n\n")
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to write to temporary file: {}", e))?;
+
+        temp_file
+            .flush()
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to flush temporary file: {}", e))?;
+
+        // Open editor
+        let status = Command::new(&editor)
+            .arg(temp_file.path())
+            .status()
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to launch editor '{}': {}", editor, e))?;
+
+        if !status.success() {
+            error!("Editor exited with non-zero status");
+            std::process::exit(1);
+        }
+
+        // Read the edited content
+        let content = fs::read_to_string(temp_file.path())
+            .into_diagnostic()
+            .map_err(|e| miette::miette!("Failed to read edited content: {}", e))?;
+
+        // Filter out comment lines and get final content
+        let filtered_content: String = content
+            .lines()
+            .filter(|line| !line.trim().starts_with('#') && !line.trim().is_empty())
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        if filtered_content.trim().is_empty() {
+            error!("No secret content provided (empty or only comments)");
+            std::process::exit(1);
+        }
+
+        filtered_content.trim().as_bytes().to_vec()
     };
 
     // Get all vault keys and specified host keys
@@ -114,9 +177,8 @@ async fn handle_store(
     }
 
     // Add specified host keys
-    if let Some(host_list) = hosts {
-        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
-        for hostname in hostnames {
+    if !hosts.is_empty() {
+        for hostname in &hosts {
             if let Some(host_key) = db
                 .get_host_key_by_hostname(hostname)
                 .await
@@ -582,17 +644,15 @@ async fn handle_delete(db: &Database, name: String) -> Result<()> {
 async fn handle_generate(
     db: &Database,
     name: String,
+    hosts: Vec<String>,
     length: usize,
     format: String,
-    hosts: Option<String>,
     description: Option<String>,
 ) -> Result<()> {
     // Validate input
     validate_secret_name(&name)?;
-    if let Some(hosts_str) = &hosts {
-        for hostname in hosts_str.split(',').map(|h| h.trim()) {
-            validate_hostname(hostname)?;
-        }
+    for hostname in &hosts {
+        validate_hostname(hostname)?;
     }
 
     use chrono::Utc;
@@ -651,9 +711,8 @@ async fn handle_generate(
     }
 
     // Add specified host keys
-    if let Some(host_list) = hosts {
-        let hostnames: Vec<&str> = host_list.split(',').map(|h| h.trim()).collect();
-        for hostname in hostnames {
+    if !hosts.is_empty() {
+        for hostname in &hosts {
             if let Some(host_key) = db
                 .get_host_key_by_hostname(hostname)
                 .await
