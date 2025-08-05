@@ -86,6 +86,39 @@ CREATE TABLE audit_log (
 
 ## Database Standards
 
+### Database Query Organization
+All database queries MUST be organized by table in the `src/db/` module:
+
+- **`src/db/keys.rs`** - All queries for the `keys` table (vault and host keys)
+- **`src/db/secrets.rs`** - All queries for the `secrets` table (metadata and complex queries)
+- **`src/db/secret_storage.rs`** - All queries for the `secret_storage` table (encrypted data)
+- **`src/db/secrets_keys.rs`** - All queries for the `secrets_keys` relationship table
+- **`src/db/secret_host_access.rs`** - All queries for the `secret_host_access` table
+- **`src/db/audit_log.rs`** - All queries for the `audit_log` table
+- **`src/db/models.rs`** - Database model structs and tests
+- **`src/db/mod.rs`** - Database connection management and method delegation
+
+#### Query Organization Rules:
+1. **Table-specific modules**: Each table gets its own module containing all related queries
+2. **Pure functions**: All query functions take `&SqlitePool` as the first parameter
+3. **No business logic**: Query modules contain only database access code, no business logic
+4. **Consistent naming**: Function names should be descriptive (e.g., `get_host_key_by_hostname`)
+5. **Error handling**: All functions return `Result<T>` from the crate's error system
+6. **Database-only**: Only database access code in these modules - no I/O, crypto, or other concerns
+
+#### Adding New Queries:
+When adding new database functionality:
+1. Add the query function to the appropriate table module (e.g., `src/db/keys.rs`)
+2. Add a delegation method to `Database` impl in `src/db/mod.rs` that calls the query function
+3. Write tests for the new functionality
+4. Update schema documentation if adding new tables/columns
+
+This organization provides:
+- **Better testability**: Each query function can be unit tested independently
+- **Clear separation**: Database logic is isolated from business logic
+- **Easy maintenance**: All queries for a table are in one place
+- **Consistent patterns**: All query modules follow the same structure
+
 ### Required Columns for All Tables
 Every table MUST include these timestamp columns:
 - `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` - When the record was first created
