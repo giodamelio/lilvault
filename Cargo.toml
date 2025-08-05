@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/lilvault"
 
 [dependencies]
-# Database
+# Database - restored "macros" feature for compile-time safety
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate", "macros"] }
 
 # Encryption (with SSH support)
@@ -23,11 +23,11 @@ atty = "0.2"
 miette = { version = "7.2", features = ["fancy"] }
 thiserror = "1.0"
 
-# Templating (for future features)
-tera = "1.20"
+# Templating removed - was unused and added significant compile overhead
+# tera = "1.20"
 
-# Async Runtime
-tokio = { version = "1.0", features = ["full"] }
+# Async Runtime - reduced features from "full" to only what we need
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "fs", "io-std", "sync"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -43,10 +43,10 @@ tempfile = "3.0"
 tabled = "0.15"
 hostname-validator = "1.1"
 
-# Logging
+# Logging - reduced features to essentials
 log = "0.4"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 tempfile = "3.0"

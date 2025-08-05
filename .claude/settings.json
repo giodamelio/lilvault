@@ -135,6 +135,10 @@
       "Bash(grep:*)",
       "Bash(sed:*)",
       "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:crates.io)",
       "mcp__sequential-thinking__sequentialthinking"
     ],
     "deny": []
