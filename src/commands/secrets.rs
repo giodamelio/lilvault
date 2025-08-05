@@ -1,5 +1,6 @@
 use lilvault::cli::SecretCommands;
 use lilvault::db::Database;
+use lilvault::validation::{validate_file_path, validate_hostname, validate_secret_name};
 use miette::Result;
 
 /// Handle secrets commands
@@ -60,6 +61,20 @@ async fn handle_store(
     stdin: bool,
     description: Option<String>,
 ) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+    if let Some(ref path) = file {
+        validate_file_path(path)?;
+    }
+    if let Some(hosts_str) = &hosts {
+        for hostname in hosts_str.split(',').map(|h| h.trim()) {
+            validate_hostname(hostname)?;
+        }
+    }
+
+    // Begin transaction for atomic secret storage
+    let tx = db.begin_transaction().await?;
+
     use chrono::Utc;
     use lilvault::crypto::{encrypt_for_recipients, host_key_to_recipient, vault_key_to_recipient};
     use lilvault::db::models::{Secret, SecretStorage};
@@ -189,6 +204,9 @@ async fn handle_store(
     .await
     .into_diagnostic()?;
 
+    // Commit transaction
+    tx.commit().await.into_diagnostic()?;
+
     info!("✓ Secret stored successfully!");
     info!("  Name: {name}");
     info!("  Version: {version}");
@@ -207,6 +225,12 @@ async fn handle_get(
     key: Option<String>,
     password_file: Option<&std::path::Path>,
 ) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+    if let Some(path) = password_file {
+        validate_file_path(path)?;
+    }
+
     use dialoguer::Select;
     use lilvault::crypto::{decrypt_secret_with_vault_key, get_password};
     use miette::IntoDiagnostic;
@@ -256,12 +280,24 @@ async fn handle_get(
                         )
                         .into_diagnostic()?;
 
-                        decrypt_secret_with_vault_key(
-                            &storage.encrypted_data,
-                            vault_key.encrypted_private_key.as_ref().unwrap(),
-                            &password,
-                        )
-                        .into_diagnostic()?
+                        {
+                            let encrypted_private_key = vault_key
+                                .encrypted_private_key
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    miette::miette!(
+                                        "Vault key '{}' is missing its private key - this indicates database corruption",
+                                        vault_key.name
+                                    )
+                                })?;
+
+                            decrypt_secret_with_vault_key(
+                                &storage.encrypted_data,
+                                encrypted_private_key,
+                                &password,
+                            )
+                            .into_diagnostic()?
+                        }
                     }
                     "host" => {
                         error!(
@@ -376,9 +412,19 @@ async fn handle_get(
             )
             .into_diagnostic()?;
 
+            let encrypted_private_key = vault_key
+                .encrypted_private_key
+                .as_ref()
+                .ok_or_else(|| {
+                    miette::miette!(
+                        "Vault key '{}' is missing its private key - this indicates database corruption",
+                        vault_key.name
+                    )
+                })?;
+
             let decrypted_data = decrypt_secret_with_vault_key(
                 &selected_entry.encrypted_data,
-                vault_key.encrypted_private_key.as_ref().unwrap(),
+                encrypted_private_key,
                 &password,
             )
             .into_diagnostic()?;
@@ -478,6 +524,9 @@ async fn handle_list(db: &Database, key: Option<String>) -> Result<()> {
 }
 
 async fn handle_delete(db: &Database, name: String) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+
     use miette::IntoDiagnostic;
     use tracing::{error, info};
 
@@ -538,6 +587,14 @@ async fn handle_generate(
     hosts: Option<String>,
     description: Option<String>,
 ) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+    if let Some(hosts_str) = &hosts {
+        for hostname in hosts_str.split(',').map(|h| h.trim()) {
+            validate_hostname(hostname)?;
+        }
+    }
+
     use chrono::Utc;
     use lilvault::crypto::{encrypt_for_recipients, host_key_to_recipient, vault_key_to_recipient};
     use lilvault::db::models::{Secret, SecretStorage};
@@ -563,7 +620,11 @@ async fn handle_generate(
             use rand::seq::SliceRandom;
             const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
             (0..length)
-                .map(|_| *CHARS.choose(&mut rng).unwrap())
+                .map(|_| {
+                    #[allow(clippy::expect_used)]
+                    let result = *CHARS.choose(&mut rng).expect("CHARS is non-empty");
+                    result
+                })
                 .collect::<Vec<u8>>()
         }
         _ => {
@@ -694,6 +755,9 @@ async fn handle_generate(
 }
 
 async fn handle_info(db: &Database, name: String) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+
     use miette::IntoDiagnostic;
     use tracing::error;
 
@@ -780,6 +844,12 @@ async fn handle_edit(
     key: Option<String>,
     password_file: Option<&std::path::Path>,
 ) -> Result<()> {
+    // Validate input
+    validate_secret_name(&name)?;
+    if let Some(path) = password_file {
+        validate_file_path(path)?;
+    }
+
     use dialoguer::Select;
     use lilvault::crypto::{
         decrypt_secret_with_vault_key, edit_with_editor, encrypt_for_recipients, get_password,
@@ -870,12 +940,16 @@ async fn handle_edit(
     };
 
     // Decrypt the secret
-    let decrypted_data = decrypt_secret_with_vault_key(
-        &encrypted_data,
-        vault_key.encrypted_private_key.as_ref().unwrap(),
-        &password,
-    )
-    .into_diagnostic()?;
+    let encrypted_private_key = vault_key.encrypted_private_key.as_ref().ok_or_else(|| {
+        miette::miette!(
+            "Vault key '{}' is missing its private key - this indicates database corruption",
+            vault_key.name
+        )
+    })?;
+
+    let decrypted_data =
+        decrypt_secret_with_vault_key(&encrypted_data, encrypted_private_key, &password)
+            .into_diagnostic()?;
 
     // Convert to string for editing
     let current_text = String::from_utf8(decrypted_data).map_err(|_| {
@@ -970,6 +1044,15 @@ async fn handle_share(
     vault_key: Option<String>,
     password_file: Option<&std::path::Path>,
 ) -> Result<()> {
+    // Validate input
+    validate_hostname(&host)?;
+    for secret_name in &secret_names {
+        validate_secret_name(secret_name)?;
+    }
+    if let Some(path) = password_file {
+        validate_file_path(path)?;
+    }
+
     use chrono::Utc;
     use dialoguer::Select;
     use lilvault::crypto::{
@@ -1091,9 +1174,19 @@ async fn handle_share(
         };
 
         // Decrypt the secret
+        let encrypted_private_key = selected_vault_key
+            .encrypted_private_key
+            .as_ref()
+            .ok_or_else(|| {
+                miette::miette!(
+                    "Vault key '{}' is missing its private key - this indicates database corruption",
+                    selected_vault_key.name
+                )
+            })?;
+
         let decrypted_data = match decrypt_secret_with_vault_key(
             &encrypted_data,
-            selected_vault_key.encrypted_private_key.as_ref().unwrap(),
+            encrypted_private_key,
             &password,
         ) {
             Ok(data) => data,
@@ -1239,6 +1332,12 @@ async fn handle_share(
 }
 
 async fn handle_unshare(db: &Database, host: String, secret_names: Vec<String>) -> Result<()> {
+    // Validate input
+    validate_hostname(&host)?;
+    for secret_name in &secret_names {
+        validate_secret_name(secret_name)?;
+    }
+
     use miette::IntoDiagnostic;
     use tracing::{error, info, warn};
 

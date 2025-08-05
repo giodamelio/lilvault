@@ -1,3 +1,7 @@
+// Clippy lints to prevent unsafe operations
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+
 use clap::Parser;
 use lilvault::cli::{Cli, Commands};
 use lilvault::db::Database;

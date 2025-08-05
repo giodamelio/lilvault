@@ -9,6 +9,10 @@ use lilvault::db::{
     Database,
     models::{Key, SecretStorage},
 };
+use lilvault::validation::{
+    validate_file_path, validate_hostname, validate_key_types, validate_port,
+    validate_vault_key_name,
+};
 use miette::{IntoDiagnostic, Result};
 use std::fs;
 use std::path::Path;
@@ -76,6 +80,12 @@ async fn handle_add_vault(
     password_file: Option<&Path>,
     no_reencrypt: bool,
 ) -> Result<()> {
+    // Validate input
+    validate_vault_key_name(&name)?;
+    if let Some(path) = password_file {
+        validate_file_path(path)?;
+    }
+
     // Get password
     let password =
         get_password_with_confirmation("Enter password for new vault key", password_file, true)
@@ -134,6 +144,13 @@ async fn handle_add_host(
     no_reencrypt: bool,
     password_file: Option<&Path>,
 ) -> Result<()> {
+    // Validate input
+    validate_hostname(&hostname)?;
+    validate_file_path(&key_path)?;
+    if let Some(path) = password_file {
+        validate_file_path(path)?;
+    }
+
     // Check if hostname already exists
     if db
         .get_host_key_by_hostname(&hostname)
@@ -210,6 +227,11 @@ async fn handle_scan_host(
     port: u16,
     key_types: String,
 ) -> Result<()> {
+    // Validate input
+    validate_hostname(&hostname)?;
+    validate_port(port)?;
+    validate_key_types(&key_types)?;
+
     use std::process::Command;
 
     info!(
@@ -301,7 +323,12 @@ async fn handle_scan_host(
 
     // If multiple keys found, let user choose (or take the first one)
     let (selected_key_type, selected_public_key) = if collected_keys.len() == 1 {
-        collected_keys.into_iter().next().unwrap()
+        #[allow(clippy::expect_used)]
+        let result = collected_keys
+            .into_iter()
+            .next()
+            .expect("guaranteed to have exactly one element");
+        result
     } else {
         info!("Multiple keys found. Selecting keys in preference order: ed25519, ecdsa, rsa");
 
@@ -316,7 +343,14 @@ async fn handle_scan_host(
             }
         }
 
-        selected.unwrap_or_else(|| collected_keys.into_iter().next().unwrap())
+        selected.unwrap_or_else(|| {
+            #[allow(clippy::expect_used)]
+            let result = collected_keys
+                .into_iter()
+                .next()
+                .expect("guaranteed to have at least one element");
+            result
+        })
     };
 
     info!("Selected {} key for import", selected_key_type);
@@ -601,14 +635,17 @@ async fn reencrypt_secrets_for_new_key(
     .into_diagnostic()?;
 
     // Decrypt the selected vault key identity (only once)
-    let identity = decrypt_master_key(
-        selected_vault_key
-            .encrypted_private_key
-            .as_ref()
-            .expect("Vault key should have private key"),
-        &password,
-    )
-    .into_diagnostic()?;
+    let encrypted_private_key = selected_vault_key
+        .encrypted_private_key
+        .as_ref()
+        .ok_or_else(|| {
+            miette::miette!(
+                "Vault key '{}' is missing its private key - this indicates database corruption",
+                selected_vault_key.name
+            )
+        })?;
+
+    let identity = decrypt_master_key(encrypted_private_key, &password).into_diagnostic()?;
 
     let mut new_versions_created = 0;
 

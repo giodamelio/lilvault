@@ -94,6 +94,8 @@
       "mcp__language-server__*(/home/giodamelio/projects/lilvault/*)",
       "mcp__language-server__references",
       "mcp__language-server__edit_file",
+      "mcp__language-server__diagnostics",
+      "mcp__language-server__definition",
       "Bash(ls:*)",
       "Bash(cargo build*)",
       "Bash(cargo check*)",
@@ -129,9 +131,13 @@
       "Bash(.claude/hooks/*.sh)",
       "Bash(sqlx*)",
       "Bash(DATABASE_URL=\"sqlite:vault.db\" cargo sqlx prepare)",
+      "Bash(devenv build:*)",
+      "Bash(grep:*)",
+      "Bash(sed:*)",
       "WebFetch(domain:docs.anthropic.com)",
       "mcp__sequential-thinking__sequentialthinking"
-    ]
+    ],
+    "deny": []
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [

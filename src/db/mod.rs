@@ -1,5 +1,5 @@
 use crate::Result;
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{Sqlite, SqlitePool, Transaction, sqlite::SqlitePoolOptions};
 use std::path::Path;
 
 pub mod audit_log;
@@ -46,6 +46,29 @@ impl Database {
     /// Get database pool for direct access
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// Begin a new database transaction
+    pub async fn begin_transaction(&self) -> Result<Transaction<'_, Sqlite>> {
+        Ok(self.pool.begin().await?)
+    }
+
+    /// Execute a function within a database transaction
+    /// If the function returns an error, the transaction is automatically rolled back
+    pub async fn transaction<T, F, Fut>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(Transaction<'_, Sqlite>) -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let tx = self.begin_transaction().await?;
+        let result = f(tx).await;
+        match result {
+            Ok(value) => Ok(value),
+            Err(e) => {
+                // Transaction is automatically rolled back when dropped
+                Err(e)
+            }
+        }
     }
 
     /// Create database file and parent directories if they don't exist

@@ -41,6 +41,7 @@ hex = "0.4"
 base64 = "0.22"
 tempfile = "3.0"
 tabled = "0.15"
+hostname-validator = "1.1"
 
 # Logging
 log = "0.4"

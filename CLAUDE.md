@@ -101,6 +101,11 @@ CREATE TABLE audit_log (
 );
 ```
 
+## Development Configuration
+
+### Configuration File Guidelines
+- **Do not use a .claude/settings.local.json**. Put all settings in the main file
+
 ## Database Standards
 
 ### Database Query Organization

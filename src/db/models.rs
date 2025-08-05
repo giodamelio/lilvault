@@ -24,11 +24,15 @@ impl Key {
         self.key_type == "host"
     }
 
-    /// Get the encrypted private key, panicking if this is not a vault key
+    /// Get the encrypted private key, only valid for vault keys
+    ///
+    /// # Panics
+    /// Panics if called on a host key (which doesn't have a private key)
+    #[allow(clippy::expect_used)]
     pub fn encrypted_private_key(&self) -> &[u8] {
-        self.encrypted_private_key
-            .as_ref()
-            .expect("encrypted_private_key is only available for vault keys")
+        self.encrypted_private_key.as_deref().expect(
+            "encrypted_private_key is only available for vault keys - check is_vault_key() first",
+        )
     }
 
     /// Get the hostname (for host keys) or name (for vault keys)
