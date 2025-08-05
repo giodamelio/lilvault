@@ -33,7 +33,13 @@ pub async fn get_keys_by_type(pool: &SqlitePool, key_type: &str) -> Result<Vec<K
 }
 
 pub async fn get_all_vault_keys(pool: &SqlitePool) -> Result<Vec<Key>> {
-    get_keys_by_type(pool, "vault").await
+    let keys = sqlx::query_as::<_, Key>(&format!(
+        "{SELECT_KEY_FIELDS} WHERE key_type = 'vault' ORDER BY created_at ASC"
+    ))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(keys)
 }
 
 pub async fn get_all_host_keys(pool: &SqlitePool) -> Result<Vec<Key>> {

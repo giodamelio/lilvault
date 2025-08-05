@@ -364,18 +364,27 @@ async fn handle_get(
             let mut options = Vec::new();
             let mut vault_entries = Vec::new();
 
+            // Collect vault key entries with their full key info for sorting
+            let mut vault_key_entries = Vec::new();
             for entry in &entries {
                 if entry.key_type == "vault" {
-                    // Get the vault key name for better display
                     if let Ok(Some(vault_key)) = db.get_vault_key(&entry.key_fingerprint).await {
-                        options.push(format!(
-                            "{} ({}) - vault key",
-                            vault_key.name,
-                            &entry.key_fingerprint[..8]
-                        ));
-                        vault_entries.push(entry);
+                        vault_key_entries.push((entry, vault_key));
                     }
                 }
+            }
+
+            // Sort vault keys by creation date (oldest first)
+            vault_key_entries.sort_by(|a, b| a.1.created_at.cmp(&b.1.created_at));
+
+            // Build options and vault_entries in sorted order
+            for (entry, vault_key) in vault_key_entries {
+                options.push(format!(
+                    "{} ({}) - vault key",
+                    vault_key.name,
+                    &entry.key_fingerprint[..8]
+                ));
+                vault_entries.push(entry);
             }
 
             if vault_entries.is_empty() {
