@@ -151,7 +151,7 @@ fn test_vault_key_management() {
         .args(["keys", "list", "--key-type", "vault"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Keys:"))
+        .stdout(predicate::str::contains("Fingerprint"))
         .stdout(predicate::str::contains("primary"))
         .stdout(predicate::str::contains("backup"));
 }
@@ -308,7 +308,7 @@ fn test_host_key_management() {
         .args(["keys", "list", "--key-type", "host"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Keys:"))
+        .stdout(predicate::str::contains("Fingerprint"))
         .stdout(predicate::str::contains("testhost"));
 }
 
