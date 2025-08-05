@@ -102,7 +102,7 @@ The Nix package automatically:
 lilvault init --name "primary"
 
 # Add host keys via scanning
-lilvault keys scan-host example.com
+lilvault key scan-host example.com
 
 # Store secrets with interactive key selection
 lilvault secret store my-secret --stdin

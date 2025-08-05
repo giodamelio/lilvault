@@ -72,7 +72,7 @@ pub async fn handle_keys(db: &Database, command: KeyCommands) -> Result<()> {
             new_name,
         } => handle_rename(db, identifier, new_name).await,
 
-        KeyCommands::Secrets { identifier } => handle_secrets(db, identifier).await,
+        KeyCommands::ListSecrets { identifier } => handle_secrets(db, identifier).await,
     }
 }
 

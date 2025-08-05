@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             info!("  Database: {}", cli.database.display());
         }
 
-        Commands::Keys { command } => {
+        Commands::Key { command } => {
             ensure_initialized(&db).await?;
             commands::keys::handle_keys(&db, command).await?;
         }

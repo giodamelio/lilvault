@@ -49,28 +49,28 @@ pub enum LilVaultError {
     #[error("Master key not found: {name}")]
     #[diagnostic(
         code(lilvault::master_key_not_found),
-        help("List available master keys with 'lilvault list-master-keys'")
+        help("List available master keys with 'lilvault key list --key-type vault'")
     )]
     MasterKeyNotFound { name: String },
 
     #[error("Host key not found: {hostname}")]
     #[diagnostic(
         code(lilvault::host_key_not_found),
-        help("Add host key with 'lilvault add-host'")
+        help("Add host key with 'lilvault key add-host'")
     )]
     HostKeyNotFound { hostname: String },
 
     #[error("Secret not found: {name}")]
     #[diagnostic(
         code(lilvault::secret_not_found),
-        help("List available secrets with 'lilvault list'")
+        help("List available secrets with 'lilvault secret list'")
     )]
     SecretNotFound { name: String },
 
     #[error("Secret version not found: {name} version {version}")]
     #[diagnostic(
         code(lilvault::secret_version_not_found),
-        help("List available versions with 'lilvault versions {name}'")
+        help("Show secret information with 'lilvault secret info {name}'")
     )]
     SecretVersionNotFound { name: String, version: i64 },
 

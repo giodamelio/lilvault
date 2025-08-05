@@ -208,10 +208,10 @@ lilvault vault list
 lilvault vault remove <fingerprint>
 
 # Host key management
-lilvault keys add-host <hostname> <ssh-public-key-path>
-lilvault keys scan-host <hostname> [--port 22] [--key-types rsa,ecdsa,ed25519] [--timeout 5]
-lilvault keys list [--key-type host]
-lilvault keys remove <hostname-or-fingerprint>
+lilvault key add-host <hostname> <ssh-public-key-path>
+lilvault key scan-host <hostname> [--port 22] [--key-types rsa,ecdsa,ed25519] [--timeout 5]
+lilvault key list [--key-type host]
+lilvault key remove <hostname-or-fingerprint>
 
 # Secret operations
 lilvault secret store <secret-name> [--hosts host1,host2] [--file <path> | --stdin] [--description "desc"]

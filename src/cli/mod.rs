@@ -30,7 +30,7 @@ pub enum Commands {
     },
 
     /// Key management (vault and host keys)
-    Keys {
+    Key {
         #[command(subcommand)]
         command: KeyCommands,
     },
@@ -120,7 +120,7 @@ pub enum KeyCommands {
     },
 
     /// List secrets accessible by a host key
-    Secrets {
+    ListSecrets {
         /// Hostname or key fingerprint to check access for
         identifier: String,
     },
