@@ -170,6 +170,10 @@ pub enum KeyCommands {
         #[arg(value_hint = ValueHint::Other)]
         identifier: String,
     },
+
+    /// List all SSH keys found on the local host (hidden debug command)
+    #[command(hide = true)]
+    ListHostKeys,
 }
 
 #[derive(Subcommand, Debug)]

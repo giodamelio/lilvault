@@ -111,6 +111,7 @@
       "Bash(git diff*)",
       "Bash(git show*)",
       "Bash(git add *)",
+      "Bash(git add:*)",
       "Bash(git commit*)",
       "Bash(git reset*)",
       "Bash(ls *)",

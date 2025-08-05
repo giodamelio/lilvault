@@ -73,6 +73,8 @@ pub async fn handle_keys(db: &Database, command: KeyCommands) -> Result<()> {
         } => handle_rename(db, identifier, new_name).await,
 
         KeyCommands::ListSecrets { identifier } => handle_secrets(db, identifier).await,
+
+        KeyCommands::ListHostKeys => handle_list_host_keys().await,
     }
 }
 
@@ -853,4 +855,136 @@ async fn handle_secrets(db: &Database, identifier: String) -> Result<()> {
     println!("{table}");
 
     Ok(())
+}
+
+/// Handle the list-host-keys hidden command - discover all SSH keys on the local host
+async fn handle_list_host_keys() -> Result<()> {
+    info!("🔍 Scanning for SSH keys on local host...");
+
+    let mut found_keys = Vec::new();
+
+    // Define search locations and key names
+    let search_locations = [
+        // System host keys (usually in /etc/ssh)
+        (
+            "/etc/ssh",
+            &[
+                "ssh_host_ed25519_key",
+                "ssh_host_ecdsa_key",
+                "ssh_host_rsa_key",
+            ][..],
+        ),
+        // BSD/macOS system location
+        (
+            "/usr/local/etc/ssh",
+            &[
+                "ssh_host_ed25519_key",
+                "ssh_host_ecdsa_key",
+                "ssh_host_rsa_key",
+            ][..],
+        ),
+        // User SSH directory
+        (
+            &format!("{}/.ssh", std::env::var("HOME").unwrap_or_default()),
+            &["id_ed25519", "id_ecdsa", "id_rsa"][..],
+        ),
+    ];
+
+    for (dir, key_names) in &search_locations {
+        info!("Checking directory: {}", dir);
+
+        for key_name in *key_names {
+            let key_path = std::path::PathBuf::from(dir).join(key_name);
+            let pub_key_path = key_path.with_extension(format!(
+                "{}.pub",
+                key_path.extension().and_then(|s| s.to_str()).unwrap_or("")
+            ));
+
+            // Check if private key exists
+            let private_exists = key_path.exists();
+            let private_readable = private_exists && std::fs::read(&key_path).is_ok();
+
+            // Check if public key exists
+            let public_exists = pub_key_path.exists();
+            let public_readable = if public_exists {
+                std::fs::read_to_string(&pub_key_path).is_ok()
+            } else {
+                false
+            };
+
+            if private_exists || public_exists {
+                found_keys.push(HostKeyInfo {
+                    key_type: key_name.to_string(),
+                    directory: dir.to_string(),
+                    private_exists,
+                    private_readable,
+                    public_exists,
+                    public_readable,
+                });
+            }
+        }
+    }
+
+    if found_keys.is_empty() {
+        info!("No SSH keys found on this host.");
+        return Ok(());
+    }
+
+    info!("Found {} SSH key(s):", found_keys.len());
+
+    #[derive(Tabled)]
+    struct HostKeyRow {
+        #[tabled(rename = "Type")]
+        key_type: String,
+        #[tabled(rename = "Directory")]
+        directory: String,
+        #[tabled(rename = "Private Key")]
+        private_status: String,
+        #[tabled(rename = "Public Key")]
+        public_status: String,
+    }
+
+    let table_data: Vec<HostKeyRow> = found_keys
+        .into_iter()
+        .map(|key| HostKeyRow {
+            key_type: key
+                .key_type
+                .replace("ssh_host_", "")
+                .replace("_key", "")
+                .replace("id_", ""),
+            directory: key.directory,
+            private_status: if key.private_exists {
+                if key.private_readable {
+                    "✓ readable".to_string()
+                } else {
+                    "✗ permission denied".to_string()
+                }
+            } else {
+                "✗ not found".to_string()
+            },
+            public_status: if key.public_exists {
+                if key.public_readable {
+                    "✓ readable".to_string()
+                } else {
+                    "✗ permission denied".to_string()
+                }
+            } else {
+                "✗ not found".to_string()
+            },
+        })
+        .collect();
+
+    let table = Table::new(table_data);
+    println!("{table}");
+
+    Ok(())
+}
+
+struct HostKeyInfo {
+    key_type: String,
+    directory: String,
+    private_exists: bool,
+    private_readable: bool,
+    public_exists: bool,
+    public_readable: bool,
 }

@@ -284,31 +284,67 @@ pub fn encrypt_for_single_recipient(data: &[u8], recipient: Recipient) -> Result
 
 /// Load SSH identity from host (used by export functionality)
 pub fn load_host_ssh_identity(hostname: &str) -> Result<SshIdentityType> {
-    let ssh_dir = std::env::var("HOME")
-        .map(|home| std::path::PathBuf::from(home).join(".ssh"))
-        .map_err(|_| LilVaultError::Internal {
-            message: "Unable to determine home directory".to_string(),
-        })?;
+    find_ssh_identity(hostname)
+}
 
-    // Try common SSH key files
-    let key_files = ["id_ed25519", "id_ecdsa", "id_rsa"];
+/// Simple filesystem search for SSH private keys in common locations
+fn find_ssh_identity(hostname: &str) -> Result<SshIdentityType> {
+    let mut attempted_paths = Vec::new();
 
-    for key_file in &key_files {
-        let key_path = ssh_dir.join(key_file);
-        if key_path.exists() {
-            let key_data = std::fs::read(&key_path).map_err(|e| LilVaultError::Internal {
-                message: format!("Failed to read SSH key file {}: {}", key_path.display(), e),
-            })?;
+    // Define search locations and key names in preference order
+    let search_locations = [
+        // System host keys (usually in /etc/ssh)
+        (
+            "/etc/ssh",
+            &[
+                "ssh_host_ed25519_key",
+                "ssh_host_ecdsa_key",
+                "ssh_host_rsa_key",
+            ][..],
+        ),
+        // BSD/macOS system location
+        (
+            "/usr/local/etc/ssh",
+            &[
+                "ssh_host_ed25519_key",
+                "ssh_host_ecdsa_key",
+                "ssh_host_rsa_key",
+            ][..],
+        ),
+        // User SSH directory
+        (
+            &format!("{}/.ssh", std::env::var("HOME").unwrap_or_default()),
+            &["id_ed25519", "id_ecdsa", "id_rsa"][..],
+        ),
+    ];
 
-            let cursor = std::io::Cursor::new(key_data);
-            if let Ok(identity) = SshIdentity::from_buffer(cursor, None) {
-                return Ok(identity);
+    for (dir, key_names) in &search_locations {
+        for key_name in *key_names {
+            let key_path = std::path::PathBuf::from(dir).join(key_name);
+            attempted_paths.push(key_path.display().to_string());
+
+            if !key_path.exists() {
+                continue;
+            }
+
+            match std::fs::read(&key_path) {
+                Ok(key_data) => {
+                    let cursor = std::io::Cursor::new(key_data);
+                    if let Ok(identity) = SshIdentity::from_buffer(cursor, None) {
+                        return Ok(identity);
+                    }
+                }
+                Err(_) => continue, // Permission denied or other read error
             }
         }
     }
 
     Err(LilVaultError::Internal {
-        message: format!("No suitable SSH identity found for host: {hostname}"),
+        message: format!(
+            "No suitable SSH identity found for host '{}'. Searched: {}",
+            hostname,
+            attempted_paths.join(", ")
+        ),
     })
 }
 
