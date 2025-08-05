@@ -46,6 +46,12 @@ pub enum Commands {
         #[command(subcommand)]
         command: AuditCommands,
     },
+
+    /// Export data in various formats
+    Export {
+        #[command(subcommand)]
+        command: ExportCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -248,5 +254,37 @@ pub enum AuditCommands {
         /// Number of days to look back
         #[arg(long)]
         days: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ExportCommands {
+    /// Export key relationships as DOT graph
+    Dot {
+        /// Output file (stdout if not specified)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+        /// Include vault keys in the graph
+        #[arg(long, default_value = "true")]
+        include_vault_keys: bool,
+        /// Include host keys in the graph
+        #[arg(long, default_value = "true")]
+        include_host_keys: bool,
+        /// Include secrets in the graph
+        #[arg(long)]
+        include_secrets: bool,
+    },
+
+    /// Export keys as CSV
+    Csv {
+        /// Output file (stdout if not specified)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+        /// Filter by key type (vault or host)
+        #[arg(long)]
+        key_type: Option<String>,
+        /// Include secret values in the export (metadata always included)
+        #[arg(long)]
+        include_secret_values: bool,
     },
 }

@@ -58,6 +58,10 @@ async fn main() -> Result<()> {
             ensure_initialized(&db).await?;
             commands::audit::handle_audit(&db, command).await?;
         }
+        Commands::Export { command } => {
+            ensure_initialized(&db).await?;
+            commands::export::handle_export(&db, command).await?;
+        }
     }
 
     Ok(())
