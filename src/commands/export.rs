@@ -255,7 +255,7 @@ async fn handle_systemd_creds_export(
     let mut skipped_count = 0;
 
     for secret_name in secret_names {
-        let cred_file = directory.join(format!("{secret_name}.cred"));
+        let cred_file = directory.join(&secret_name);
 
         // Check if file exists and handle force flag
         if cred_file.exists() && !force {
